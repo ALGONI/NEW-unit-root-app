@@ -7,7 +7,7 @@ import io
 import matplotlib as mpl
 from datetime import datetime
 from statsmodels.tsa.stattools import adfuller, kpss
-from scipy.stats import skew, kurtosis
+from scipy.stats import skew, kurtosis, jarque_bera
 import warnings
 
 # Import arch and check version
@@ -56,8 +56,9 @@ st.markdown("""
 
 # Sidebar configuration
 st.sidebar.title("📊 Test Configuration")
-st.sidebar.subheader("Select Tests")
-test_options = {
+st.sidebar.subheader("Select Analysis Options")
+analysis_options = {
+    'Descriptive': st.sidebar.checkbox("Descriptive Statistics", value=True),
     'ADF': st.sidebar.checkbox("Augmented Dickey-Fuller (ADF)", value=True),
     'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
     'KPSS': st.sidebar.checkbox("KPSS", value=True),
@@ -250,7 +251,7 @@ if uploaded_file:
                 
                 # Select which variable to analyze (if multiple selected)
                 if len(value_cols) > 1:
-                    selected_var = st.selectbox("Select Variable for Unit Root Test", options=value_cols)
+                    selected_var = st.selectbox("Select Variable for Analysis", options=value_cols)
                 else:
                     selected_var = value_cols[0]
                 
@@ -258,60 +259,53 @@ if uploaded_file:
                 diff_suffix = get_differencing_suffix(diff_selection)
                 display_title = f"{selected_var}{diff_suffix}"
                 
-                # Compute descriptive statistics for all selected columns
-                desc_stats_all = {}
-                
-                for col in value_cols:
-                    ts = df[col]
-                    
-                    # Apply differencing based on selection
-                    if diff_selection == "First Difference":
-                        ts_diff = ts.diff().dropna()
-                        suffix = " (Δ)"
-                    elif diff_selection == "Second Difference":
-                        ts_diff = ts.diff().diff().dropna()
-                        suffix = " (Δ²)"
-                    else:  # Level (No Differencing)
-                        ts_diff = ts
-                        suffix = ""
-                    
-                    # Calculate stats for the (possibly differenced) series
-                    desc_stats_all[col + suffix] = {
-                        'Count': ts_diff.count(),
-                        'Mean': ts_diff.mean(),
-                        'Std': ts_diff.std(),
-                        'Min': ts_diff.min(),
-                        '25%': ts_diff.quantile(0.25),
-                        '50%': ts_diff.quantile(0.50),
-                        '75%': ts_diff.quantile(0.75),
-                        'Max': ts_diff.max(),
-                        'Skewness': skew(ts_diff),
-                        'Kurtosis': kurtosis(ts_diff, fisher=True)
-                    }
-                
-                # Create a DataFrame from the descriptive statistics
-                desc_stats_df = pd.DataFrame(desc_stats_all)
-                
-                # Display descriptive statistics for all variables
-                with st.expander("📊 Descriptive Statistics", expanded=True):
-                    st.dataframe(desc_stats_df.style.format("{:.4f}"))
-                    
-                    # Download descriptive statistics
-                    stats_buffer = io.BytesIO()
-                    desc_stats_df.to_csv(stats_buffer)
-                    st.download_button(
-                        "📊 Download Descriptive Statistics",
-                        stats_buffer.getvalue(),
-                        f"descriptive_stats_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv"
-                    )
-                
-                # Select the TS for the selected variable and apply differencing
-                ts = apply_differencing(df[selected_var], diff_selection)
-                
                 if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
                     with st.spinner("Processing data..."):
                         try:
+                            # Compute descriptive statistics for all selected columns
+                            desc_stats_all = {}
+                            jb_test_results = {}
+                            
+                            for col in value_cols:
+                                ts = df[col]
+                                
+                                # Apply differencing based on selection
+                                if diff_selection == "First Difference":
+                                    ts_diff = ts.diff().dropna()
+                                    suffix = " (Δ)"
+                                elif diff_selection == "Second Difference":
+                                    ts_diff = ts.diff().diff().dropna()
+                                    suffix = " (Δ²)"
+                                else:  # Level (No Differencing)
+                                    ts_diff = ts
+                                    suffix = ""
+                                
+                                # Run Jarque-Bera test for normality
+                                jb_stat, jb_pval = jarque_bera(ts_diff.dropna())
+                                
+                                # Calculate stats for the (possibly differenced) series
+                                desc_stats_all[col + suffix] = {
+                                    'Count': ts_diff.count(),
+                                    'Mean': ts_diff.mean(),
+                                    'Std': ts_diff.std(),
+                                    'Min': ts_diff.min(),
+                                    '25%': ts_diff.quantile(0.25),
+                                    '50%': ts_diff.quantile(0.50),
+                                    '75%': ts_diff.quantile(0.75),
+                                    'Max': ts_diff.max(),
+                                    'Skewness': skew(ts_diff),
+                                    'Kurtosis': kurtosis(ts_diff, fisher=True),
+                                    'JB Stat': jb_stat,
+                                    'JB p-value': jb_pval,
+                                    'Normal': "Yes" if jb_pval > 0.05 else "No"
+                                }
+                            
+                            # Create a DataFrame from the descriptive statistics
+                            desc_stats_df = pd.DataFrame(desc_stats_all)
+                            
+                            # Select the TS for the selected variable and apply differencing
+                            ts = apply_differencing(df[selected_var], diff_selection)
+                            
                             # Validate data
                             if len(ts) < 20:
                                 st.error(f"Insufficient data points ({len(ts)}). Need at least 20 observations for reliable results.")
@@ -334,200 +328,264 @@ if uploaded_file:
                                 autolag = lag_selection_method.lower()
                                 max_lag = max_lags
                             
-                            # Visualizations
-                            st.subheader(f"📉 Time Series Visualization: {display_title}")
-                            tab1, tab2 = st.tabs(["Line Chart", "Interactive Chart"])
-                            
-                            with tab1:
-                                fig, ax = plt.subplots(figsize=(10, 5))
-                                ax.plot(ts.index, ts.values, linewidth=2)
-                                ax.set_title(f"Time Series: {display_title}")
-                                ax.grid(True, alpha=0.3)
-                                plt.tight_layout()
-                                st.pyplot(fig)
-                            
-                            with tab2:
-                                st.line_chart(ts, use_container_width=True)
-                            
-                            # Run tests
-                            results = {}
-                            with st.spinner("Running unit root tests..."):
-                                if test_options['ADF']:
-                                    adf_result = adfuller(
-                                        ts, 
-                                        regression=adf_regression, 
-                                        maxlag=max_lag, 
-                                        autolag=autolag if autolag != "None" else None
-                                    )
-                                    
-                                    # Get the actual lag used
-                                    actual_lag = adf_result[2] if autolag else max_lag
-                                    
-                                    results['ADF'] = {
-                                        'Test Statistic': adf_result[0],
-                                        'p-value': adf_result[1],
-                                        'Critical Values (5%)': adf_result[4]['5%'],
-                                        'Lags': actual_lag,
-                                        'Lag Method': lag_selection_method,
-                                        'Regression Type': regression_type_display.get(adf_regression, adf_regression)
-                                    }
-                                
-                                if test_options['PP']:
-                                    pp = PhillipsPerron(
-                                        ts, 
-                                        trend=pp_regression, 
-                                        lags=max_lag if lag_selection_method == "Fixed" else None
-                                    )
-                                    results['PP'] = {
-                                        'Test Statistic': pp.stat,
-                                        'p-value': pp.pvalue,
-                                        'Critical Values (5%)': pp.critical_values['5%'],
-                                        'Lags': pp.lags,
-                                        'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Newey-West",
-                                        'Regression Type': regression_type_display.get(pp_regression, pp_regression)
-                                    }
-                                
-                                if test_options['KPSS']:
-                                    # For KPSS, adapt lag method
-                                    if lag_selection_method == "Fixed":
-                                        kpss_nlags = max_lags
-                                    else:
-                                        kpss_nlags = "auto"  # KPSS uses Newey-West for automatic lag selection
-                                        
-                                    kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(
-                                        ts, 
-                                        regression=kpss_regression, 
-                                        nlags=kpss_nlags
-                                    )
-                                    results['KPSS'] = {
-                                        'Test Statistic': kpss_stat,
-                                        'p-value': kpss_pval,
-                                        'Critical Values (5%)': kpss_crit['5%'],
-                                        'Lags': kpss_lags,
-                                        'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Newey-West",
-                                        'Regression Type': regression_type_display.get(kpss_regression, kpss_regression)
-                                    }
-                                
-                                if test_options['DFGLS']:
-                                    try:
-                                        # For DFGLS, adapt lag selection method
-                                        if lag_selection_method == "Fixed":
-                                            dfgls_method = None  # Use fixed lags
-                                            dfgls_max_lags = max_lags
-                                        else:
-                                            # Map lag selection method to valid DFGLS options
-                                            method_mapping = {
-                                                "AIC": "aic",
-                                                "BIC": "bic",
-                                                "t-stat": "t-stat",
-                                                "None": "aic"  # Default to AIC if None is selected
-                                            }
-                                            dfgls_method = method_mapping.get(lag_selection_method, "aic")  # Default to 'aic'
-                                            dfgls_max_lags = max_lags if max_lags is not None else 12
-                                        
-                                        # Ensure max_lags is valid
-                                        if dfgls_max_lags is not None and (dfgls_max_lags < 0 or dfgls_max_lags >= len(ts) // 2):
-                                            st.warning(f"Invalid max_lags ({dfgls_max_lags}) for DFGLS. Using default value (12).")
-                                            dfgls_max_lags = 12
-                                        
-                                        # Run DFGLS test
-                                        dfgls = DFGLS(
-                                            ts,
-                                            trend=dfgls_regression,
-                                            max_lags=dfgls_max_lags,
-                                            method=dfgls_method
-                                        )
-                                        results['DFGLS'] = {
-                                            'Test Statistic': dfgls.stat,
-                                            'p-value': dfgls.pvalue,
-                                            'Critical Values (5%)': dfgls.critical_values['5%'],
-                                            'Lags': dfgls.lags,
-                                            'Lag Method': "Fixed" if lag_selection_method == "Fixed" else lag_selection_method,
-                                            'Regression Type': regression_type_display.get(dfgls_regression, dfgls_regression)
-                                        }
-                                    except Exception as e:
-                                        st.warning(f"DFGLS test failed: {str(e)}. Possible causes: incompatible parameters or insufficient data.")
-                                        results['DFGLS'] = {
-                                            'Test Statistic': None,
-                                            'p-value': None,
-                                            'Critical Values (5%)': None,
-                                            'Lags': None,
-                                            'Lag Method': lag_selection_method,
-                                            'Regression Type': dfgls_regression
-                                        }
-                                
-                                if test_options['VR']:
-                                    # Variance Ratio test
-                                    vr_lags = max_lags if lag_selection_method == "Fixed" else None
-                                    vr = VarianceRatio(ts, lags=vr_lags)
-                                    results['VR'] = {
-                                        'Test Statistic': vr.stat,
-                                        'p-value': vr.pvalue,
-                                        'Critical Values (5%)': vr.critical_values['5%'],
-                                        'Lags': vr.lags,
-                                        'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Default",
-                                        'Regression Type': 'N/A (Not Applicable)'
-                                    }
-                            
-                            if not results:
-                                st.warning("No tests selected. Please select at least one test.")
+                            # Create tabs for different analysis outputs
+                            tabs = []
+                            if analysis_options['Descriptive']:
+                                tabs.append("Descriptive Statistics")
+                            if any(analysis_options[test] for test in ['ADF', 'PP', 'KPSS', 'DFGLS', 'VR']):
+                                tabs.append("Unit Root Tests")
+                            if len(tabs) == 0:
+                                st.warning("No analysis options selected. Please select at least one option.")
                                 st.stop()
+                                
+                            analysis_tabs = st.tabs(tabs)
                             
-                            # Display results
-                            results_df = pd.DataFrame(results).T
-                            st.subheader(f"📋 Test Results: {display_title}")
-                            st.dataframe(results_df.style.format({
-                                'Test Statistic': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
-                                'p-value': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
-                                'Critical Values (5%)': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
-                                'Lags': lambda x: '{:.0f}'.format(x) if isinstance(x, (int, float)) else x
-                            }))
+                            tab_index = 0
+                            # Descriptive Statistics Tab
+                            if analysis_options['Descriptive']:
+                                with analysis_tabs[tab_index]:
+                                    st.subheader(f"📊 Descriptive Statistics: {display_title}")
+                                    st.dataframe(desc_stats_df.style.format("{:.4f}"))
+                                    
+                                    # Show JB test results more prominently
+                                    st.subheader("Jarque-Bera Test for Normality")
+                                    jb_results = pd.DataFrame({
+                                        'Variable': [k for k in desc_stats_all.keys()],
+                                        'JB Statistic': [v['JB Stat'] for v in desc_stats_all.values()],
+                                        'p-value': [v['JB p-value'] for v in desc_stats_all.values()],
+                                        'Normally Distributed': [v['Normal'] for v in desc_stats_all.values()]
+                                    })
+                                    st.dataframe(jb_results.style.format({
+                                        'JB Statistic': '{:.4f}',
+                                        'p-value': '{:.4f}'
+                                    }))
+                                    
+                                    # Visualization of distribution
+                                    st.subheader("Distribution Analysis")
+                                    fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+                                    
+                                    # Histogram with KDE
+                                    sns.histplot(ts, kde=True, ax=axs[0])
+                                    axs[0].set_title(f"Distribution: {display_title}")
+                                    axs[0].grid(True, alpha=0.3)
+                                    
+                                    # QQ Plot
+                                    from scipy import stats
+                                    stats.probplot(ts, dist="norm", plot=axs[1])
+                                    axs[1].set_title("Q-Q Plot")
+                                    axs[1].grid(True, alpha=0.3)
+                                    
+                                    plt.tight_layout()
+                                    st.pyplot(fig)
+                                    
+                                    # Download descriptive statistics
+                                    stats_buffer = io.BytesIO()
+                                    desc_stats_df.to_csv(stats_buffer)
+                                    st.download_button(
+                                        "📊 Download Descriptive Statistics",
+                                        stats_buffer.getvalue(),
+                                        f"descriptive_stats_{datetime.now().strftime('%Y%m%d')}.csv",
+                                        mime="text/csv"
+                                    )
+                                tab_index += 1
                             
-                            # Interpretation
-                            st.subheader("🔍 Interpretation")
-                            st.markdown(f"**{selected_var}** {diff_suffix}")
-                            for test, values in results.items():
-                                p_value = values['p-value']
-                                if not isinstance(p_value, (int, float)):
-                                    continue
-                                interpretation = "Stationary" if (test == 'KPSS' and p_value >= 0.05) or \
-                                    (test != 'KPSS' and p_value < 0.05) else "Non-stationary"
-                                st.markdown(f"• {test}: {interpretation} (p-value = {p_value:.4f})")
-                            
-                            # Visualizations
-                            st.subheader("📊 Visual Analysis")
-                            
-                            # P-value heatmap
-                            p_value_df = results_df[results_df['p-value'].apply(lambda x: isinstance(x, (int, float)))]
-                            if not p_value_df.empty:
-                                fig1, ax1 = plt.subplots(figsize=(8, len(p_value_df)/2))
-                                sns.heatmap(
-                                    p_value_df[["p-value"]].astype(float),
-                                    annot=True,
-                                    cmap='RdYlGn_r',
-                                    fmt=".4f",
-                                    vmin=0,
-                                    vmax=0.1
-                                )
-                                plt.title(f"P-values: {display_title}")
-                                st.pyplot(fig1)
-                            else:
-                                st.info("No valid p-values for heatmap.")
-                            
-                            # Download results
-                            st.subheader("📥 Download Results")
+                            # Unit Root Tests Tab
+                            if any(analysis_options[test] for test in ['ADF', 'PP', 'KPSS', 'DFGLS', 'VR']):
+                                with analysis_tabs[tab_index]:
+                                    # Visualizations for time series
+                                    st.subheader(f"📉 Time Series Visualization: {display_title}")
+                                    st_tabs = st.tabs(["Line Chart", "Interactive Chart"])
+                                    
+                                    with st_tabs[0]:
+                                        fig, ax = plt.subplots(figsize=(10, 5))
+                                        ax.plot(ts.index, ts.values, linewidth=2)
+                                        ax.set_title(f"Time Series: {display_title}")
+                                        ax.grid(True, alpha=0.3)
+                                        plt.tight_layout()
+                                        st.pyplot(fig)
+                                    
+                                    with st_tabs[1]:
+                                        st.line_chart(ts, use_container_width=True)
+                                    
+                                    # Run unit root tests
+                                    results = {}
+                                    with st.spinner("Running unit root tests..."):
+                                        if analysis_options['ADF']:
+                                            adf_result = adfuller(
+                                                ts, 
+                                                regression=adf_regression, 
+                                                maxlag=max_lag, 
+                                                autolag=autolag if autolag != "None" else None
+                                            )
+                                            
+                                            # Get the actual lag used
+                                            actual_lag = adf_result[2] if autolag else max_lag
+                                            
+                                            results['ADF'] = {
+                                                'Test Statistic': adf_result[0],
+                                                'p-value': adf_result[1],
+                                                'Critical Values (5%)': adf_result[4]['5%'],
+                                                'Lags': actual_lag,
+                                                'Lag Method': lag_selection_method,
+                                                'Regression Type': regression_type_display.get(adf_regression, adf_regression)
+                                            }
+                                        
+                                        if analysis_options['PP']:
+                                            pp = PhillipsPerron(
+                                                ts, 
+                                                trend=pp_regression, 
+                                                lags=max_lag if lag_selection_method == "Fixed" else None
+                                            )
+                                            results['PP'] = {
+                                                'Test Statistic': pp.stat,
+                                                'p-value': pp.pvalue,
+                                                'Critical Values (5%)': pp.critical_values['5%'],
+                                                'Lags': pp.lags,
+                                                'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Newey-West",
+                                                'Regression Type': regression_type_display.get(pp_regression, pp_regression)
+                                            }
+                                        
+                                        if analysis_options['KPSS']:
+                                            # For KPSS, adapt lag method
+                                            if lag_selection_method == "Fixed":
+                                                kpss_nlags = max_lags
+                                            else:
+                                                kpss_nlags = "auto"  # KPSS uses Newey-West for automatic lag selection
+                                                
+                                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(
+                                                ts, 
+                                                regression=kpss_regression, 
+                                                nlags=kpss_nlags
+                                            )
+                                            results['KPSS'] = {
+                                                'Test Statistic': kpss_stat,
+                                                'p-value': kpss_pval,
+                                                'Critical Values (5%)': kpss_crit['5%'],
+                                                'Lags': kpss_lags,
+                                                'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Newey-West",
+                                                'Regression Type': regression_type_display.get(kpss_regression, kpss_regression)
+                                            }
+                                        
+                                        if analysis_options['DFGLS']:
+                                            try:
+                                                # For DFGLS, adapt lag selection method
+                                                if lag_selection_method == "Fixed":
+                                                    dfgls_method = None  # Use fixed lags
+                                                    dfgls_max_lags = max_lags
+                                                else:
+                                                    # Map lag selection method to valid DFGLS options
+                                                    method_mapping = {
+                                                        "AIC": "aic",
+                                                        "BIC": "bic",
+                                                        "t-stat": "t-stat",
+                                                        "None": "aic"  # Default to AIC if None is selected
+                                                    }
+                                                    dfgls_method = method_mapping.get(lag_selection_method, "aic")  # Default to 'aic'
+                                                    dfgls_max_lags = max_lags if max_lags is not None else 12
+                                                
+                                                # Ensure max_lags is valid
+                                                if dfgls_max_lags is not None and (dfgls_max_lags < 0 or dfgls_max_lags >= len(ts) // 2):
+                                                    st.warning(f"Invalid max_lags ({dfgls_max_lags}) for DFGLS. Using default value (12).")
+                                                    dfgls_max_lags = 12
+                                                
+                                                # Run DFGLS test
+                                                dfgls = DFGLS(
+                                                    ts,
+                                                    trend=dfgls_regression,
+                                                    max_lags=dfgls_max_lags,
+                                                    method=dfgls_method
+                                                )
+                                                results['DFGLS'] = {
+                                                    'Test Statistic': dfgls.stat,
+                                                    'p-value': dfgls.pvalue,
+                                                    'Critical Values (5%)': dfgls.critical_values['5%'],
+                                                    'Lags': dfgls.lags,
+                                                    'Lag Method': "Fixed" if lag_selection_method == "Fixed" else lag_selection_method,
+                                                    'Regression Type': regression_type_display.get(dfgls_regression, dfgls_regression)
+                                                }
+                                            except Exception as e:
+                                                st.warning(f"DFGLS test failed: {str(e)}. Possible causes: incompatible parameters or insufficient data.")
+                                                results['DFGLS'] = {
+                                                    'Test Statistic': None,
+                                                    'p-value': None,
+                                                    'Critical Values (5%)': None,
+                                                    'Lags': None,
+                                                    'Lag Method': lag_selection_method,
+                                                    'Regression Type': dfgls_regression
+                                                }
+                                        
+                                        if analysis_options['VR']:
+                                            # Variance Ratio test
+                                            vr_lags = max_lags if lag_selection_method == "Fixed" else None
+                                            vr = VarianceRatio(ts, lags=vr_lags)
+                                            results['VR'] = {
+                                                'Test Statistic': vr.stat,
+                                                'p-value': vr.pvalue,
+                                                'Critical Values (5%)': vr.critical_values['5%'],
+                                                'Lags': vr.lags,
+                                                'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Default",
+                                                'Regression Type': 'N/A (Not Applicable)'
+                                            }
+                                    
+                                    if not results:
+                                        st.warning("No unit root tests selected. Please select at least one test.")
+                                    else:
+                                        # Display results
+                                        results_df = pd.DataFrame(results).T
+                                        st.subheader(f"📋 Unit Root Test Results: {display_title}")
+                                        st.dataframe(results_df.style.format({
+                                            'Test Statistic': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                                            'p-value': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                                            'Critical Values (5%)': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                                            'Lags': lambda x: '{:.0f}'.format(x) if isinstance(x, (int, float)) else x
+                                        }))
+                                        
+                                        # Interpretation
+                                        st.subheader("🔍 Interpretation")
+                                        st.markdown(f"**{selected_var}** {diff_suffix}")
+                                        for test, values in results.items():
+                                            p_value = values['p-value']
+                                            if not isinstance(p_value, (int, float)):
+                                                continue
+                                            interpretation = "Stationary" if (test == 'KPSS' and p_value >= 0.05) or \
+                                                (test != 'KPSS' and p_value < 0.05) else "Non-stationary"
+                                            st.markdown(f"• {test}: {interpretation} (p-value = {p_value:.4f})")
+                                        
+                                        # Visualizations
+                                        st.subheader("📊 Visual Analysis")
+                                        
+                                        # P-value heatmap
+                                        p_value_df = results_df[results_df['p-value'].apply(lambda x: isinstance(x, (int, float)))]
+                                        if not p_value_df.empty:
+                                            fig1, ax1 = plt.subplots(figsize=(8, len(p_value_df)/2))
+                                            sns.heatmap(
+                                                p_value_df[["p-value"]].astype(float),
+                                                annot=True,
+                                                cmap='RdYlGn_r',
+                                                fmt=".4f",
+                                                vmin=0,
+                                                vmax=0.1
+                                            )
+                                            plt.title(f"P-values: {display_title}")
+                                            st.pyplot(fig1)
+                                        else:
+                                            st.info("No valid p-values for heatmap.")
+                                        
+                                        # Download results
+                                        st.subheader("📥 Download Results")
 
-                            # CSV download option (doesn't require xlsxwriter)
-                            csv_buffer = io.BytesIO()
-                            results_df.to_csv(csv_buffer)
-                            st.download_button(
-                                "📊 Download Results CSV",
-                                csv_buffer.getvalue(),
-                                f"unit_root_results_{selected_var}_{diff_selection.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
-                                mime="text/csv"
-                            )
+                                        # CSV download option (doesn't require xlsxwriter)
+                                        csv_buffer = io.BytesIO()
+                                        results_df.to_csv(csv_buffer)
+                                        st.download_button(
+                                            "📊 Download Unit Root Test Results",
+                                            csv_buffer.getvalue(),
+                                            f"unit_root_results_{selected_var}_{diff_selection.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.csv",
+                                            mime="text/csv"
+                                        )
 
-                            # Also offer time series data download
+                            # Also offer time series data download (outside of tabs)
+                            st.subheader("📥 Download Data")
                             data_buffer = io.BytesIO()
                             ts.to_frame().to_csv(data_buffer)
                             st.download_button(
@@ -542,7 +600,7 @@ if uploaded_file:
                             st.info("Please check your data format and column selections.")
             
             except Exception as e:
-                st.warning(f"Could not compute descriptive statistics: {str(e)}")
+                st.warning(f"Could not process data: {str(e)}")
 
 else:
     st.info("Upload a time series file or try sample data.")
@@ -578,13 +636,17 @@ with st.expander("📚 Instructions"):
     1. Upload a CSV/Excel file with time series data
     2. Select date and value column(s)
     3. Choose the differencing level (Level, First Difference, Second Difference)
-    4. Select tests and lag selection methods
+    4. Select analysis options (Descriptive Statistics and/or Unit Root Tests)
     5. Run analysis and download results
     
     **Differencing Levels**:
     - **Level (No Differencing)**: Original data without transformation
     - **First Difference**: Changes between consecutive observations (Δyt = yt - yt-1)
     - **Second Difference**: Differences of differences (Δ²yt = Δyt - Δyt-1)
+    
+    **Analysis Options**:
+    - **Descriptive Statistics**: Provides summary statistics including Jarque-Bera test for normality
+    - **Unit Root Tests**: Tests for stationarity (ADF, PP, KPSS, DFGLS, VR)
     
     **Lag Selection Methods**:
     - **Fixed Value**: Uses the exact number of lags you specify
@@ -599,10 +661,15 @@ with st.expander("📚 Instructions"):
     - Quarterly: YYYYQ1, YYYY-Q1
     - Yearly: YYYY
     
-    **DFGLS Test Notes**:
-    - Requires at least 20 observations for reliable results.
-    - Supported lag selection methods: AIC, BIC, t-stat, or Fixed.
-    - Only 'Constant' (c) or 'Constant & Trend' (ct) regression types are supported.
+    **Jarque-Bera Test**:
+    - Tests whether sample data has skewness and kurtosis matching a normal distribution
+    - Null hypothesis: data is normally distributed
+    - If p-value < 0.05, reject the null hypothesis (data is not normally distributed)
+    
+    **Unit Root Tests Notes**:
+    - ADF/PP/VR: Null hypothesis is non-stationarity (p < 0.05 indicates stationarity)
+    - KPSS: Null hypothesis is stationarity (p < 0.05 indicates non-stationarity)
+    - DFGLS: Requires at least 20 observations and only supports 'Constant' or 'Constant & Trend'
     
     **Dependencies**:
     ```
@@ -617,4 +684,4 @@ with st.expander("📚 Instructions"):
     ```
     """)
 
-st.markdown("© 2025 Unit Root Test App | v3.2.0")
+st.markdown("© 2025 Unit Root Test App | v3.3.0")
