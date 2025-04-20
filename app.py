@@ -75,13 +75,6 @@ kpss_regression = st.sidebar.selectbox(
     format_func=lambda x: {"c": "Constant", "ct": "Constant & Trend"}.get(x),
     index=0
 )
-za_regression = st.sidebar.selectbox(
-    "Zivot-Andrews Regression",
-    options=["c", "t", "ct"],
-    format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
-                          "ct": "Break in Constant & Trend"}.get(x),
-    index=2
-)
 
 # Main content
 st.title("📊 Advanced Unit Root Test Application")
@@ -225,14 +218,14 @@ if uploaded_file:
                             }
                         
                         if test_options['ZA']:
-                            za = ZivotAndrews(ts, regression=za_regression, lags=lags)
+                            za = ZivotAndrews(ts, lags=lags)
                             breakpoint_date = ts.index[za.break_idx] if za.break_idx is not None else None
                             results['ZA'] = {
                                 'Test Statistic': za.stat,
                                 'p-value': za.pvalue,
                                 'Critical Values (5%)': za.critical_values['5%'],
                                 'Lags': lags,
-                                'Regression Type': za_regression,
+                                'Regression Type': 'Default (Constant & Trend Break)',
                                 'Breakpoint': breakpoint_date.strftime('%Y-%m-%d') if breakpoint_date else 'N/A'
                             }
                             if breakpoint_date:
@@ -386,6 +379,7 @@ with st.expander("📚 Instructions"):
       arch
       xlsxwriter
       ```
+    - Zivot-Andrews test uses the default model (allows breaks in constant and trend).
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.8.0")
+st.markdown("© 2025 Unit Root Test App | v2.9.0")
