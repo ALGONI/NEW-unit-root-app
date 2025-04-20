@@ -9,6 +9,8 @@ from datetime import datetime
 
 from statsmodels.tsa.stattools import adfuller, kpss
 from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
+# Import PdfPages at the module level for better code organization
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Set professional plotting style
 plt.style.use('ggplot')
@@ -56,9 +58,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Sidebar for configuration
-st.sidebar.image("https://raw.githubusercontent.com/statsmodels/statsmodels/main/docs/source/_static/statsmodels-logo-v2-horizontal.svg", width=200)
-st.sidebar.title("Test Configuration")
+# Sidebar for configuration - use a placeholder image that doesn't require external URLs
+st.sidebar.title("📊 Test Configuration")
 
 # Main content
 st.title("📊 Advanced Unit Root Test Application")
@@ -91,7 +92,7 @@ if uploaded_file:
         with col1:
             date_col = st.selectbox("📅 Select Date Column", options=df.columns)
         with col2:
-            value_col = st.selectbox("📈 Select Value Column", options=df.columns)
+            value_col = st.selectbox("📈 Select Value Column", options=[col for col in df.columns if col != date_col])
         
         # Test selection
         st.sidebar.subheader("Select Tests to Run")
@@ -178,10 +179,10 @@ if uploaded_file:
                             'Breakpoint': 'N/A'
                         }
                     
-                    # PP Test
+                    # PP Test - FIXED: Initialize with the correct trend parameter
                     if run_pp:
                         pp = PhillipsPerron(ts, trend=adf_regression)
-                        pp.trend = adf_regression
+                        # Remove the redundant reassignment that was causing issues
                         results['Phillips-Perron'] = {
                             'Test Statistic': pp.stat,
                             'p-value': pp.pvalue,
@@ -253,214 +254,217 @@ if uploaded_file:
                 
                 st.success("✅ Unit root tests completed!")
                 
-                # Extract key results for summary table
-                summary_cols = ['Test Statistic', 'p-value', 'Critical Values (5%)', 'Breakpoint']
-                results_df = pd.DataFrame({k: {col: v[col] for col in summary_cols if col in v} 
-                                          for k, v in results.items()}).T
-                
-                # Create detailed results dataframe
-                detailed_results = pd.DataFrame(results).T
-                
-                # Display results in tabs
-                tab1, tab2 = st.tabs(["Summary Results", "Detailed Results"])
-                
-                with tab1:
-                    st.subheader("📋 Unit Root Test Summary")
+                # Check if there are any results before proceeding
+                if not results:
+                    st.warning("No tests were selected. Please select at least one test to run.")
+                else:
+                    # Extract key results for summary table
+                    summary_cols = ['Test Statistic', 'p-value', 'Critical Values (5%)', 'Breakpoint']
+                    results_df = pd.DataFrame({k: {col: v[col] for col in summary_cols if col in v} 
+                                              for k, v in results.items()}).T
                     
-                    # Format summary table
-                    st.dataframe(results_df.style.format({
-                        'Test Statistic': '{:.4f}',
-                        'p-value': '{:.4f}',
-                        'Critical Values (5%)': '{:.4f}'
-                    }), use_container_width=True)
+                    # Create detailed results dataframe
+                    detailed_results = pd.DataFrame(results).T
                     
-                    # Quick interpretation
-                    st.subheader("🔍 Quick Interpretation")
+                    # Display results in tabs
+                    tab1, tab2 = st.tabs(["Summary Results", "Detailed Results"])
                     
-                    # Create interpretation
-                    interpretations = []
-                    
-                    for test, values in results.items():
-                        p_value = values['p-value']
-                        stat = values['Test Statistic']
-                        crit_val = values.get('Critical Values (5%)', None)
+                    with tab1:
+                        st.subheader("📋 Unit Root Test Summary")
                         
-                        if test == 'KPSS':
-                            # For KPSS, null hypothesis is stationarity
-                            if p_value < 0.05:
-                                interpretations.append(f"• {test}: Non-stationary (p-value = {p_value:.4f} < 0.05)")
+                        # Format summary table
+                        st.dataframe(results_df.style.format({
+                            'Test Statistic': '{:.4f}',
+                            'p-value': '{:.4f}',
+                            'Critical Values (5%)': '{:.4f}'
+                        }), use_container_width=True)
+                        
+                        # Quick interpretation
+                        st.subheader("🔍 Quick Interpretation")
+                        
+                        # Create interpretation
+                        interpretations = []
+                        
+                        for test, values in results.items():
+                            p_value = values['p-value']
+                            stat = values['Test Statistic']
+                            crit_val = values.get('Critical Values (5%)', None)
+                            
+                            if test == 'KPSS':
+                                # For KPSS, null hypothesis is stationarity
+                                if p_value < 0.05:
+                                    interpretations.append(f"• {test}: Non-stationary (p-value = {p_value:.4f} < 0.05)")
+                                else:
+                                    interpretations.append(f"• {test}: Stationary (p-value = {p_value:.4f} ≥ 0.05)")
                             else:
-                                interpretations.append(f"• {test}: Stationary (p-value = {p_value:.4f} ≥ 0.05)")
-                        else:
-                            # For other tests, null hypothesis is non-stationarity
-                            if p_value < 0.05:
-                                interpretations.append(f"• {test}: Stationary (p-value = {p_value:.4f} < 0.05)")
-                            else:
-                                interpretations.append(f"• {test}: Non-stationary (p-value = {p_value:.4f} ≥ 0.05)")
+                                # For other tests, null hypothesis is non-stationarity
+                                if p_value < 0.05:
+                                    interpretations.append(f"• {test}: Stationary (p-value = {p_value:.4f} < 0.05)")
+                                else:
+                                    interpretations.append(f"• {test}: Non-stationary (p-value = {p_value:.4f} ≥ 0.05)")
+                        
+                        # Display interpretations
+                        for interp in interpretations:
+                            st.markdown(interp)
                     
-                    # Display interpretations
-                    for interp in interpretations:
-                        st.markdown(interp)
-                
-                with tab2:
-                    st.subheader("📊 Detailed Test Results")
-                    st.dataframe(detailed_results.style.format({
-                        'Test Statistic': '{:.4f}',
-                        'p-value': '{:.4f}',
-                        'Critical Values (1%)': '{:.4f}',
-                        'Critical Values (5%)': '{:.4f}',
-                        'Critical Values (10%)': '{:.4f}',
-                        'Lags': '{:.0f}'
-                    }), use_container_width=True)
-                
-                # Visualizations
-                st.subheader("📊 Visual Analysis")
-                
-                # Create visualization tabs
-                viz_tab1, viz_tab2, viz_tab3 = st.tabs(["P-value Heatmap", "Time Series with Breaks", "Stationarity Analysis"])
-                
-                with viz_tab1:
-                    # P-value Heatmap
-                    fig1, ax1 = plt.subplots(figsize=(8, len(results)/2 + 1))
-                    sns.heatmap(
-                        results_df[["p-value"]].astype(float), 
-                        annot=True, 
-                        cmap='RdYlGn_r', 
-                        fmt=".4f", 
-                        ax=ax1,
-                        vmin=0, 
-                        vmax=0.1,
-                        cbar_kws={'label': 'p-value'}
-                    )
-                    ax1.set_title("P-values from Unit Root Tests")
-                    plt.tight_layout()
-                    st.pyplot(fig1)
-                
-                with viz_tab2:
-                    if run_za and breakpoint_date is not None:
-                        # Time Series Plot with Breaks
-                        fig2, ax2 = plt.subplots(figsize=(10, 5))
-                        ax2.plot(ts.index, ts.values, label='Time Series', linewidth=2)
-                        
-                        # Add breakpoint line
-                        ax2.axvline(breakpoint_date, color='red', linestyle='--', linewidth=2, 
-                                    label=f'Zivot-Andrews Break: {breakpoint_date.strftime("%Y-%m-%d")}')
-                        
-                        # Add shaded regions before and after break
-                        ax2.axvspan(ts.index[0], breakpoint_date, alpha=0.1, color='blue', label='Pre-Break Period')
-                        ax2.axvspan(breakpoint_date, ts.index[-1], alpha=0.1, color='red', label='Post-Break Period')
-                        
-                        ax2.set_title("Time Series with Structural Break Detection")
-                        ax2.set_xlabel("Date")
-                        ax2.set_ylabel(value_col)
-                        ax2.legend(loc='best')
-                        ax2.grid(True, alpha=0.3)
+                    with tab2:
+                        st.subheader("📊 Detailed Test Results")
+                        st.dataframe(detailed_results.style.format({
+                            'Test Statistic': '{:.4f}',
+                            'p-value': '{:.4f}',
+                            'Critical Values (1%)': '{:.4f}',
+                            'Critical Values (5%)': '{:.4f}',
+                            'Critical Values (10%)': '{:.4f}',
+                            'Lags': '{:.0f}'
+                        }), use_container_width=True)
+                    
+                    # Visualizations
+                    st.subheader("📊 Visual Analysis")
+                    
+                    # Create visualization tabs
+                    viz_tab1, viz_tab2, viz_tab3 = st.tabs(["P-value Heatmap", "Time Series with Breaks", "Stationarity Analysis"])
+                    
+                    with viz_tab1:
+                        # P-value Heatmap
+                        fig1, ax1 = plt.subplots(figsize=(8, len(results)/2 + 1))
+                        sns.heatmap(
+                            results_df[["p-value"]].astype(float), 
+                            annot=True, 
+                            cmap='RdYlGn_r', 
+                            fmt=".4f", 
+                            ax=ax1,
+                            vmin=0, 
+                            vmax=0.1,
+                            cbar_kws={'label': 'p-value'}
+                        )
+                        ax1.set_title("P-values from Unit Root Tests")
                         plt.tight_layout()
-                        st.pyplot(fig2)
-                    else:
-                        st.warning("Zivot-Andrews test must be selected to visualize structural breaks.")
-                
-                with viz_tab3:
-                    # Create differentiated series
-                    ts_diff = ts.diff().dropna()
+                        st.pyplot(fig1)
                     
-                    # Create subplot
-                    fig3, axs = plt.subplots(2, 1, figsize=(10, 8))
+                    with viz_tab2:
+                        if run_za and breakpoint_date is not None:
+                            # Time Series Plot with Breaks
+                            fig2, ax2 = plt.subplots(figsize=(10, 5))
+                            ax2.plot(ts.index, ts.values, label='Time Series', linewidth=2)
+                            
+                            # Add breakpoint line
+                            ax2.axvline(breakpoint_date, color='red', linestyle='--', linewidth=2, 
+                                        label=f'Zivot-Andrews Break: {breakpoint_date.strftime("%Y-%m-%d")}')
+                            
+                            # Add shaded regions before and after break
+                            ax2.axvspan(ts.index[0], breakpoint_date, alpha=0.1, color='blue', label='Pre-Break Period')
+                            ax2.axvspan(breakpoint_date, ts.index[-1], alpha=0.1, color='red', label='Post-Break Period')
+                            
+                            ax2.set_title("Time Series with Structural Break Detection")
+                            ax2.set_xlabel("Date")
+                            ax2.set_ylabel(value_col)
+                            ax2.legend(loc='best')
+                            ax2.grid(True, alpha=0.3)
+                            plt.tight_layout()
+                            st.pyplot(fig2)
+                        else:
+                            st.warning("Zivot-Andrews test must be selected to visualize structural breaks.")
                     
-                    # Original series
-                    axs[0].plot(ts.index, ts.values, label='Original Series', color='blue')
-                    axs[0].set_title("Original Time Series")
-                    axs[0].grid(True, alpha=0.3)
+                    with viz_tab3:
+                        # Create differentiated series
+                        ts_diff = ts.diff().dropna()
+                        
+                        # Create subplot
+                        fig3, axs = plt.subplots(2, 1, figsize=(10, 8))
+                        
+                        # Original series
+                        axs[0].plot(ts.index, ts.values, label='Original Series', color='blue')
+                        axs[0].set_title("Original Time Series")
+                        axs[0].grid(True, alpha=0.3)
+                        
+                        # Differenced series
+                        axs[1].plot(ts_diff.index, ts_diff.values, label='Differenced Series', color='green')
+                        axs[1].set_title("First Differenced Series")
+                        axs[1].grid(True, alpha=0.3)
+                        
+                        plt.tight_layout()
+                        st.pyplot(fig3)
+                        
+                        # Add explanatory text
+                        st.markdown("""
+                        **Stationarity Analysis:**
+                        
+                        The charts above show the original time series and its first difference. 
+                        A stationary series should have:
+                        
+                        1. Constant mean over time
+                        2. Constant variance over time
+                        3. No systematic pattern in the autocovariance
+                        
+                        Often, differencing a non-stationary series can make it stationary,
+                        which is visible as a more stable pattern in the differenced series.
+                        """)
                     
-                    # Differenced series
-                    axs[1].plot(ts_diff.index, ts_diff.values, label='Differenced Series', color='green')
-                    axs[1].set_title("First Differenced Series")
-                    axs[1].grid(True, alpha=0.3)
+                    # Download options
+                    st.subheader("📥 Download Results")
                     
-                    plt.tight_layout()
-                    st.pyplot(fig3)
+                    # Create Excel file with multiple sheets
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                        # Summary sheet
+                        results_df.to_excel(writer, sheet_name='Summary Results')
+                        
+                        # Detailed results sheet
+                        detailed_results.to_excel(writer, sheet_name='Detailed Results')
+                        
+                        # Original data sheet
+                        ts.to_frame().to_excel(writer, sheet_name='Original Data')
+                        
+                        # Add metadata sheet
+                        meta_data = {
+                            'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'File Analyzed': uploaded_file.name,
+                            'Date Column': date_col,
+                            'Value Column': value_col,
+                            'Number of Observations': len(ts),
+                            'Start Date': ts.index.min().strftime('%Y-%m-%d'),
+                            'End Date': ts.index.max().strftime('%Y-%m-%d'),
+                            'Tests Run': ', '.join(results.keys())
+                        }
+                        pd.DataFrame(list(meta_data.items()), columns=['Metadata', 'Value']).to_excel(writer, sheet_name='Metadata')
                     
-                    # Add explanatory text
-                    st.markdown("""
-                    **Stationarity Analysis:**
+                    excel_buffer.seek(0)
                     
-                    The charts above show the original time series and its first difference. 
-                    A stationary series should have:
+                    # Create download buttons in columns
+                    col1, col2 = st.columns(2)
                     
-                    1. Constant mean over time
-                    2. Constant variance over time
-                    3. No systematic pattern in the autocovariance
+                    with col1:
+                        st.download_button(
+                            "📊 Download Excel Report",
+                            data=excel_buffer.getvalue(),
+                            file_name=f"unit_root_results_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                            mime="application/vnd.ms-excel",
+                            use_container_width=True
+                        )
                     
-                    Often, differencing a non-stationary series can make it stationary,
-                    which is visible as a more stable pattern in the differenced series.
-                    """)
-                
-                # Download options
-                st.subheader("📥 Download Results")
-                
-                # Create Excel file with multiple sheets
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                    # Summary sheet
-                    results_df.to_excel(writer, sheet_name='Summary Results')
-                    
-                    # Detailed results sheet
-                    detailed_results.to_excel(writer, sheet_name='Detailed Results')
-                    
-                    # Original data sheet
-                    ts.to_frame().to_excel(writer, sheet_name='Original Data')
-                    
-                    # Add metadata sheet
-                    meta_data = {
-                        'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'File Analyzed': uploaded_file.name,
-                        'Date Column': date_col,
-                        'Value Column': value_col,
-                        'Number of Observations': len(ts),
-                        'Start Date': ts.index.min().strftime('%Y-%m-%d'),
-                        'End Date': ts.index.max().strftime('%Y-%m-%d'),
-                        'Tests Run': ', '.join(results.keys())
-                    }
-                    pd.DataFrame(list(meta_data.items()), columns=['Metadata', 'Value']).to_excel(writer, sheet_name='Metadata')
-                
-                excel_buffer.seek(0)
-                
-                # Create download buttons in columns
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.download_button(
-                        "📊 Download Excel Report",
-                        data=excel_buffer.getvalue(),
-                        file_name=f"unit_root_results_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.ms-excel",
-                        use_container_width=True
-                    )
-                
-                # Create PDF for plots
-                with col2:
-                    # Create a comprehensive PDF with all plots
-                    pdf_buffer = io.BytesIO()
-                    
-                    # Save multiple figures to a single PDF
-                    from matplotlib.backends.backend_pdf import PdfPages
-                    
-                    with PdfPages(pdf_buffer) as pdf:
-                        # Add all figures
-                        if 'fig' in locals(): pdf.savefig(fig)
-                        if 'fig1' in locals(): pdf.savefig(fig1)
-                        if run_za and 'fig2' in locals(): pdf.savefig(fig2)
-                        if 'fig3' in locals(): pdf.savefig(fig3)
-                    
-                    pdf_buffer.seek(0)
-                    
-                    st.download_button(
-                        "📈 Download All Plots (PDF)",
-                        data=pdf_buffer.getvalue(),
-                        file_name=f"unit_root_plots_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                    # Create PDF for plots
+                    with col2:
+                        # Create a comprehensive PDF with all plots
+                        pdf_buffer = io.BytesIO()
+                        
+                        # Save multiple figures to a single PDF
+                        with PdfPages(pdf_buffer) as pdf:
+                            # Add all figures
+                            if 'fig' in locals(): pdf.savefig(fig)
+                            if 'fig1' in locals(): pdf.savefig(fig1)
+                            if run_za and 'fig2' in locals() and breakpoint_date is not None: 
+                                pdf.savefig(fig2)
+                            if 'fig3' in locals(): pdf.savefig(fig3)
+                        
+                        pdf_buffer.seek(0)
+                        
+                        st.download_button(
+                            "📈 Download All Plots (PDF)",
+                            data=pdf_buffer.getvalue(),
+                            file_name=f"unit_root_plots_{datetime.now().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
             
             except Exception as e:
                 st.error(f"Error during analysis: {str(e)}")
