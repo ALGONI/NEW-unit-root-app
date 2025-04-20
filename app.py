@@ -10,6 +10,7 @@ from statsmodels.tsa.stattools import adfuller, kpss
 from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 from matplotlib.backends.backend_pdf import PdfPages
 import warnings
+import ruptures as rpt  # For additional structural break detection (Bai-Perron)
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -55,12 +56,15 @@ test_options = {
     'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
     'KPSS': st.sidebar.checkbox("KPSS", value=True),
     'ZA': st.sidebar.checkbox("Zivot-Andrews", value=True),
-    'DFGLS': st.sidebar.checkbox("DFGLS", value=False),
+    'BP': st.sidebar.checkbox("Bai-Perron (Structural Breaks)", value=True),
+    'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
 
 # Test parameters
 st.sidebar.subheader("Test Parameters")
+lags = st.sidebar.number_input("Number of Lags for All Tests", min_value=1, max_value=20, value=4, step=1)
+
 adf_regression = st.sidebar.selectbox(
     "ADF Regression Type",
     options=["c", "ct", "n", "ctt"],
@@ -75,7 +79,7 @@ kpss_regression = st.sidebar.selectbox(
     index=0
 )
 za_regression = st.sidebar.selectbox(
-    "Zivot-Andrews Model",
+    "Zivot-Andrews Regression",
     options=["c", "t", "ct"],
     format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
                           "ct": "Break in Constant & Trend"}.get(x),
@@ -102,21 +106,23 @@ def load_data(file):
 
 @st.cache_data
 def parse_dates(series, sample_size=10):
-    """Robust date parsing with multiple format attempts"""
+    """Robust date parsing for yearly, monthly, daily, and quarterly data"""
     formats = [
-        None, '%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y%m%d', 
-        '%YM%m', '%Y-%m', '%Y/%m', '%Y%m', '%YQ%q', '%Y-Q%q'
+        None, '%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y%m%d',  # Daily
+        '%Y-%m', '%Y/%m', '%Y%m', '%YM%m',  # Monthly
+        '%YQ%q', '%Y-Q%q', '%Y',  # Quarterly and Yearly
+        '%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M'  # Daily with time
     ]
     
     for fmt in formats:
         try:
             parsed = pd.to_datetime(series, format=fmt, errors='coerce')
-            if parsed.notna().sum() > len(series) * 0.8:  # At least 80% successful
+            if parsed.notna().sum() > len(series) * 0.8:
                 return parsed
         except:
             continue
     
-    # Try Year-Month format (2013M01)
+    # Custom parsing for Year-Month (2013M01)
     try:
         def parse_year_month(date_str):
             if isinstance(date_str, str) and 'M' in date_str:
@@ -129,7 +135,13 @@ def parse_dates(series, sample_size=10):
     except:
         pass
     
-    return pd.to_datetime(series, errors='coerce')
+    # Try pandas default parsing as fallback
+    parsed = pd.to_datetime(series, errors='coerce')
+    if parsed.notna().sum() > len(series) * 0.5:
+        return parsed
+    
+    st.warning("Could not parse all dates. Some data may be excluded.")
+    return parsed
 
 if uploaded_file:
     with st.spinner("Loading data..."):
@@ -159,8 +171,8 @@ if uploaded_file:
                     df.set_index(date_col, inplace=True)
                     ts = df[value_col]
                     
-                    if len(ts) < 10:
-                        st.error("Insufficient data points after cleaning. Need at least 10 observations.")
+                    if len(ts) < lags + 2:
+                        st.error(f"Insufficient data points ({len(ts)}). Need at least {lags + 2} observations.")
                         st.stop()
                     
                     # Visualizations
@@ -180,70 +192,89 @@ if uploaded_file:
                     
                     # Run tests
                     results = {}
+                    breakpoints = []
                     with st.spinner("Running unit root tests..."):
                         if test_options['ADF']:
-                            adf_result = adfuller(ts, regression=adf_regression, autolag='AIC')
+                            adf_result = adfuller(ts, regression=adf_regression, maxlag=lags, autolag=None)
                             results['ADF'] = {
                                 'Test Statistic': adf_result[0],
                                 'p-value': adf_result[1],
                                 'Critical Values (5%)': adf_result[4]['5%'],
-                                'Lags': adf_result[2],
+                                'Lags': lags,
                                 'Regression Type': adf_regression,
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['PP']:
-                            pp = PhillipsPerron(ts, trend=adf_regression)
+                            pp = PhillipsPerron(ts, trend=adf_regression, lags=lags)
                             results['PP'] = {
                                 'Test Statistic': pp.stat,
                                 'p-value': pp.pvalue,
                                 'Critical Values (5%)': pp.critical_values['5%'],
-                                'Lags': pp.lags,
+                                'Lags': lags,
                                 'Regression Type': adf_regression,
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['KPSS']:
-                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags="auto")
+                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags=lags)
                             results['KPSS'] = {
                                 'Test Statistic': kpss_stat,
                                 'p-value': kpss_pval,
                                 'Critical Values (5%)': kpss_crit['5%'],
-                                'Lags': kpss_lags,
-                                'regression Type': kpss_regression,
+                                'Lags': lags,
+                                'Regression Type': kpss_regression,
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['ZA']:
-                            za = ZivotAndrews(ts, model=za_regression)
+                            za = ZivotAndrews(ts, regression=za_regression, lags=lags)
                             breakpoint_date = ts.index[za.break_idx] if za.break_idx is not None else None
                             results['ZA'] = {
                                 'Test Statistic': za.stat,
                                 'p-value': za.pvalue,
                                 'Critical Values (5%)': za.critical_values['5%'],
-                                'Lags': za.lags,
+                                'Lags': lags,
                                 'Regression Type': za_regression,
                                 'Breakpoint': breakpoint_date.strftime('%Y-%m-%d') if breakpoint_date else 'N/A'
                             }
+                            if breakpoint_date:
+                                breakpoints.append(('ZA', breakpoint_date))
+                        
+                        if test_options['BP']:
+                            algo = rpt.Pelt(model="l2").fit(ts.values)
+                            bp_indices = algo.predict(pen=10)  # Penalty parameter for number of breaks
+                            bp_dates = [ts.index[i] for i in bp_indices if i < len(ts)]
+                            results['BP'] = {
+                                'Test Statistic': 'N/A',
+                                'p-value': 'N/A',
+                                'Critical Values (5%)': 'N/A',
+                                'Lags': 'N/A',
+                                'Regression Type': 'N/A',
+                                'Breakpoint': ', '.join([d.strftime('%Y-%m-%d') for d in bp_dates]) if bp_dates else 'N/A'
+                            }
+                            for bp_date in bp_dates:
+                                breakpoints.append(('BP', bp_date))
                         
                         if test_options['DFGLS']:
-                            dfgls = DFGLS(ts, trend=adf_regression in ['ct', 'ctt'])
+                            trend = 'ct' if adf_regression in ['ct', 'ctt'] else 'c'
+                            dfgls = DFGLS(ts, trend=trend, max_lags=lags, method='aic')
                             results['DFGLS'] = {
                                 'Test Statistic': dfgls.stat,
                                 'p-value': dfgls.pvalue,
                                 'Critical Values (5%)': dfgls.critical_values['5%'],
                                 'Lags': dfgls.lags,
-                                'Regression Type': 'trend' if adf_regression in ['ct', 'ctt'] else 'constant',
+                                'Regression Type': trend,
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['VR']:
-                            vr = VarianceRatio(ts, lags=4)
+                            vr = VarianceRatio(ts, lags=lags)
                             results['VR'] = {
                                 'Test Statistic': vr.stat,
                                 'p-value': vr.pvalue,
                                 'Critical Values (5%)': vr.critical_values['5%'],
-                                'Lags': 4,
+                                'Lags': lags,
                                 'Regression Type': 'N/A',
                                 'Breakpoint': 'N/A'
                             }
@@ -256,16 +287,21 @@ if uploaded_file:
                     results_df = pd.DataFrame(results).T
                     st.subheader("📋 Test Results")
                     st.dataframe(results_df.style.format({
-                        'Test Statistic': '{:.4f}',
-                        'p-value': '{:.4f}',
-                        'Critical Values (5%)': '{:.4f}',
-                        'Lags': '{:.0f}'
+                        'Test Statistic': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                        'p-value': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                        'Critical Values (5%)': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                        'Lags': lambda x: '{:.0f}'.format(x) if isinstance(x, (int, float)) else x
                     }))
                     
                     # Interpretation
                     st.subheader("🔍 Interpretation")
                     for test, values in results.items():
+                        if test == 'BP':
+                            st.markdown(f"• {test}: Detected breakpoints at {values['Breakpoint']}")
+                            continue
                         p_value = values['p-value']
+                        if not isinstance(p_value, (int, float)):
+                            continue
                         interpretation = "Stationary" if (test == 'KPSS' and p_value >= 0.05) or \
                             (test != 'KPSS' and p_value < 0.05) else "Non-stationary"
                         st.markdown(f"• {test}: {interpretation} (p-value = {p_value:.4f})")
@@ -275,30 +311,34 @@ if uploaded_file:
                     viz_tab1, viz_tab2 = st.tabs(["P-value Heatmap", "Time Series with Breaks"])
                     
                     with viz_tab1:
-                        fig1, ax1 = plt.subplots(figsize=(8, len(results)/2))
-                        sns.heatmap(
-                            results_df[["p-value"]].astype(float),
-                            annot=True,
-                            cmap='RdYlGn_r',
-                            fmt=".4f",
-                            vmin=0,
-                            vmax=0.1
-                        )
-                        plt.title("P-values")
-                        st.pyplot(fig1)
+                        p_value_df = results_df[results_df['p-value'].apply(lambda x: isinstance(x, (int, float)))]
+                        if not p_value_df.empty:
+                            fig1, ax1 = plt.subplots(figsize=(8, len(p_value_df)/2))
+                            sns.heatmap(
+                                p_value_df[["p-value"]].astype(float),
+                                annot=True,
+                                cmap='RdYlGn_r',
+                                fmt=".4f",
+                                vmin=0,
+                                vmax=0.1
+                            )
+                            plt.title("P-values")
+                            st.pyplot(fig1)
+                        else:
+                            st.info("No valid p-values for heatmap.")
                     
                     with viz_tab2:
-                        if test_options['ZA'] and 'ZA' in results and results['ZA']['Breakpoint'] != 'N/A':
+                        if breakpoints:
                             fig2, ax2 = plt.subplots(figsize=(10, 5))
-                            ax2.plot(ts.index, ts.values)
-                            ax2.axvline(pd.to_datetime(results['ZA']['Breakpoint']), 
-                                      color='red', linestyle='--', 
-                                      label=f'Break: {results["ZA"]["Breakpoint"]}')
+                            ax2.plot(ts.index, ts.values, label='Time Series')
+                            for test_name, bp_date in breakpoints:
+                                ax2.axvline(bp_date, color='red' if test_name == 'ZA' else 'blue', 
+                                           linestyle='--', label=f'{test_name} Break: {bp_date.strftime("%Y-%m-%d")}')
                             ax2.legend()
-                            plt.title("Time Series with Structural Break")
+                            plt.title("Time Series with Structural Breaks")
                             st.pyplot(fig2)
                         else:
-                            st.info("Run Zivot-Andrews test to see structural breaks.")
+                            st.info("No structural breaks detected. Run ZA or BP tests.")
                     
                     # Download results
                     excel_buffer = io.BytesIO()
@@ -345,10 +385,14 @@ with st.expander("📚 Instructions"):
     st.markdown("""
     1. Upload a CSV/Excel file with time series data
     2. Select date and value columns
-    3. Choose tests and parameters
+    3. Choose tests and set number of lags
     4. Run analysis and download results
     
-    **Note**: Data should have consistent date formats and numeric values.
+    **Supported Date Formats**:
+    - Daily: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
+    - Monthly: YYYY-MM, YYYYMM, YYYY-MM, 2013M01
+    - Quarterly: YYYYQ1, YYYY-Q1
+    - Yearly: YYYY
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.1.0")
+st.markdown("© 2025 Unit Root Test App | v2.2.0")
