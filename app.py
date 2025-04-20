@@ -67,6 +67,10 @@ test_options = {
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
 
+# Warn if Lee-Strazicich is unavailable
+if not LEE_STRAZICICH_AVAILABLE:
+    st.sidebar.warning("Lee-Strazicich test requires 'arch' version 5.0.0 or later. Install it with 'pip install arch>=5.0.0' or deselect the test.")
+
 # Test parameters
 st.sidebar.subheader("Test Parameters")
 lags = st.sidebar.number_input("Number of Lags for All Tests", min_value=1, max_value=20, value=4, step=1)
@@ -430,6 +434,7 @@ with st.expander("📚 Instructions"):
       arch>=5.0.0
       xlsxwriter
       ```
+    - If Lee-Strazicich is unavailable, deselect the test to avoid errors.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.6.0")
+st.markdown("© 2025 Unit Root Test App | v2.7.0")
