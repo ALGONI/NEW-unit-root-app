@@ -105,6 +105,16 @@ if uploaded_file:
         
         # Test parameters
         st.sidebar.subheader("Test Parameters")
+        
+        # Add information about date format detection
+        st.sidebar.markdown("""
+        ### Date Format Detection
+        The app will attempt to automatically detect and handle various date formats, including:
+        - Standard formats (YYYY-MM-DD)
+        - Year-Month formats (e.g., 2013M01)
+        - Quarterly formats (e.g., 2013Q1)
+        """)
+        
         adf_regression = st.sidebar.selectbox("ADF Regression Type", 
                                         options=["c", "ct", "n", "ctt"], 
                                         format_func=lambda x: {
@@ -137,8 +147,60 @@ if uploaded_file:
         
         if process_button:
             try:
-                # Data processing
-                df[date_col] = pd.to_datetime(df[date_col])
+                # Data processing with robust date parsing
+                # Try to detect and handle various date formats including "2013M01" format
+                try:
+                    # First check if the data contains a format like "2013M01"
+                    sample_date = df[date_col].iloc[0]
+                    if isinstance(sample_date, str) and 'M' in sample_date and len(sample_date) == 7:
+                        # This is likely a year-month format like "2013M01"
+                        st.info(f"Detected date format like '{sample_date}' (YearMonth). Parsing accordingly.")
+                        
+                        # Custom parsing for "2013M01" format - extract year and month
+                        def parse_year_month(date_str):
+                            if isinstance(date_str, str) and 'M' in date_str:
+                                parts = date_str.split('M')
+                                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                                    year = int(parts[0])
+                                    month = int(parts[1])
+                                    return pd.Timestamp(year=year, month=month, day=1)
+                            # If we can't parse it with our custom parser, try pandas
+                            return pd.to_datetime(date_str, errors='coerce')
+                        
+                        df[date_col] = df[date_col].apply(parse_year_month)
+                    elif isinstance(sample_date, str) and 'Q' in sample_date:
+                        # Handle quarterly format like "2013Q1"
+                        st.info(f"Detected quarterly date format like '{sample_date}'. Parsing accordingly.")
+                        df[date_col] = pd.PeriodIndex(df[date_col], freq='Q').to_timestamp()
+                    else:
+                        # Standard datetime parsing for other formats
+                        df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                        
+                        # Check if we have NaT values after parsing and inform the user
+                        nat_count = df[date_col].isna().sum()
+                        if nat_count > 0:
+                            st.warning(f"Found {nat_count} unparseable date values. These rows will be excluded from analysis.")
+                except Exception as e:
+                    st.error(f"Error parsing dates: {str(e)}")
+                    st.info("Trying alternative date parsing methods...")
+                    
+                    # Try with format inference and various common formats
+                    try:
+                        # Try with some common time series formats
+                        formats = ['%YM%m', '%Y-%m', '%Y/%m', '%Y%m', '%YQ%q', '%Y-Q%q']
+                        
+                        for fmt in formats:
+                            try:
+                                df[date_col] = pd.to_datetime(df[date_col], format=fmt, errors='coerce')
+                                if not df[date_col].isna().all():
+                                    st.success(f"Successfully parsed dates with format: {fmt}")
+                                    break
+                            except:
+                                continue
+                    except:
+                        pass
+                
+                # Drop rows with NaT dates and continue with processing
                 df = df[[date_col, value_col]].dropna()
                 df.set_index(date_col, inplace=True)
                 ts = df[value_col]
@@ -253,6 +315,11 @@ if uploaded_file:
                         }
                 
                 st.success("✅ Unit root tests completed!")
+                
+                # Check if there is valid data to proceed with
+                if len(ts) == 0:
+                    st.error("No valid data points after date parsing and cleaning. Please check your input data and column selections.")
+                    return
                 
                 # Check if there are any results before proceeding
                 if not results:
