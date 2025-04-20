@@ -7,8 +7,19 @@ import io
 import matplotlib as mpl
 from datetime import datetime
 from statsmodels.tsa.stattools import adfuller, kpss
-from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 import warnings
+
+# Import arch and check version
+try:
+    import arch
+    arch_version = tuple(int(x) for x in arch.__version__.split('.'))
+    ZA_REGRESSION_SUPPORTED = arch_version >= (5, 0, 0)
+except:
+    ZA_REGRESSION_SUPPORTED = False
+    arch_version = (0, 0, 0)
+    
+# Then import unit root tests from arch
+from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -60,40 +71,69 @@ test_options = {
 
 # Test parameters
 st.sidebar.subheader("Test Parameters")
-lag_method = st.sidebar.selectbox(
-    "Lag Selection Method",
-    options=["Fixed", "AIC", "BIC"],
-    format_func=lambda x: {"Fixed": "Fixed Lags", "AIC": "AIC (Akaike Information Criterion)", 
-                          "BIC": "BIC (Bayesian Information Criterion)"}.get(x),
-    index=0
-)
+lags = st.sidebar.number_input("Number of Lags for All Tests", min_value=1, max_value=20, value=4, step=1)
 
-# Show lags input only for Fixed method
-if lag_method == "Fixed":
-    lags = st.sidebar.number_input("Number of Lags", min_value=1, max_value=20, value=4, step=1)
-else:
-    lags = None  # Will be determined by AIC/BIC
+# Define regression type mapping (for display)
+regression_type_display = {
+    "c": "Constant Only",
+    "ct": "Constant & Trend",
+    "n": "No Constant or Trend",
+    "ctt": "Constant, Linear & Quadratic Trend"
+}
 
+# Display current arch version
+st.sidebar.info(f"Current arch version: {'.'.join(str(x) for x in arch_version)}")
+if not ZA_REGRESSION_SUPPORTED:
+    st.sidebar.warning("Zivot-Andrews break type selection requires 'arch' version 5.0.0 or later. Using default model. Install with 'pip install arch>=5.0.0'.")
+
+# Standardized regression type options for most tests
+regression_options = ["c", "ct", "n", "ctt"]
 adf_regression = st.sidebar.selectbox(
     "ADF Regression Type",
-    options=["c", "ct", "n", "ctt"],
-    format_func=lambda x: {"c": "Constant", "ct": "Constant & Trend", 
-                          "n": "No Constant or Trend", "ctt": "Constant, Linear & Quadratic Trend"}.get(x),
-    index=1
+    options=regression_options,
+    format_func=lambda x: regression_type_display.get(x, x),
+    index=1  # Default to constant & trend
 )
+
+# For KPSS: Only c and ct are supported
 kpss_regression = st.sidebar.selectbox(
     "KPSS Regression Type",
     options=["c", "ct"],
-    format_func=lambda x: {"c": "Constant", "ct": "Constant & Trend"}.get(x),
-    index=0
+    format_func=lambda x: regression_type_display.get(x, x),
+    index=0  # Default to constant only
 )
-za_regression = st.sidebar.selectbox(
-    "Zivot-Andrews Regression",
-    options=["c", "t", "ct"],
-    format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
-                          "ct": "Break in Constant & Trend"}.get(x),
-    index=2
+
+# Phillips-Perron: Same options as ADF
+pp_regression = st.sidebar.selectbox(
+    "Phillips-Perron Regression Type",
+    options=regression_options,
+    format_func=lambda x: regression_type_display.get(x, x),
+    index=1  # Default to constant & trend
 )
+
+# For DFGLS: Only c and ct are supported
+dfgls_regression = st.sidebar.selectbox(
+    "DFGLS Regression Type",
+    options=["c", "ct"],
+    format_func=lambda x: regression_type_display.get(x, x),
+    index=1  # Default to constant & trend
+)
+
+# For Zivot-Andrews: Only if supported version
+if ZA_REGRESSION_SUPPORTED:
+    za_regression = st.sidebar.selectbox(
+        "Zivot-Andrews Break Type",
+        options=["c", "t", "ct"],
+        format_func=lambda x: {
+            "c": "Break in Constant", 
+            "t": "Break in Trend", 
+            "ct": "Break in Constant & Trend"
+        }.get(x, x),
+        index=2  # Default to breaks in both constant & trend
+    )
+else:
+    za_regression = "ct"  # Default value for older versions
+    st.sidebar.info("Zivot-Andrews will use default break model (Constant & Trend)")
 
 # Main content
 st.title("📊 Advanced Unit Root Test Application")
@@ -180,8 +220,8 @@ if uploaded_file:
                     df.set_index(date_col, inplace=True)
                     ts = df[value_col]
                     
-                    if len(ts) < 3:
-                        st.error(f"Insufficient data points ({len(ts)}). Need at least 3 observations.")
+                    if len(ts) < lags + 2:
+                        st.error(f"Insufficient data points ({len(ts)}). Need at least {lags + 2} observations.")
                         st.stop()
                     
                     # Visualizations
@@ -204,97 +244,130 @@ if uploaded_file:
                     breakpoints = []
                     with st.spinner("Running unit root tests..."):
                         if test_options['ADF']:
-                            autolag = None if lag_method == "Fixed" else lag_method.lower()
-                            adf_result = adfuller(ts, regression=adf_regression, maxlag=lags, autolag=autolag)
-                            used_lags = adf_result[2] if autolag else lags
+                            adf_result = adfuller(ts, regression=adf_regression, maxlag=lags, autolag=None)
                             results['ADF'] = {
                                 'Test Statistic': adf_result[0],
                                 'p-value': adf_result[1],
                                 'Critical Values (5%)': adf_result[4]['5%'],
-                                'Lags': used_lags,
-                                'Regression Type': adf_regression,
+                                'Lags': lags,
+                                'Regression Type': regression_type_display.get(adf_regression, adf_regression),
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['PP']:
-                            pp = PhillipsPerron(ts, trend=adf_regression, lags=lags if lag_method == "Fixed" else None)
-                            used_lags = pp.lags if lag_method != "Fixed" else lags
+                            pp = PhillipsPerron(ts, trend=pp_regression, lags=lags)
                             results['PP'] = {
                                 'Test Statistic': pp.stat,
                                 'p-value': pp.pvalue,
                                 'Critical Values (5%)': pp.critical_values['5%'],
-                                'Lags': used_lags,
-                                'Regression Type': adf_regression,
+                                'Lags': lags,
+                                'Regression Type': regression_type_display.get(pp_regression, pp_regression),
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['KPSS']:
-                            nlags = lags if lag_method == "Fixed" else "auto"
-                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags=nlags)
-                            used_lags = kpss_lags if nlags == "auto" else lags
+                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags=lags)
                             results['KPSS'] = {
                                 'Test Statistic': kpss_stat,
                                 'p-value': kpss_pval,
                                 'Critical Values (5%)': kpss_crit['5%'],
-                                'Lags': used_lags,
-                                'Regression Type': kpss_regression,
+                                'Lags': lags,
+                                'Regression Type': regression_type_display.get(kpss_regression, kpss_regression),
                                 'Breakpoint': 'N/A'
                             }
                         
                         if test_options['ZA']:
                             try:
-                                method = lag_method.lower() if lag_method != "Fixed" else None
-                                za = ZivotAndrews(ts, regression=za_regression, lags=lags if lag_method == "Fixed" else None, method=method)
-                                break_idx = za.break_idx
+                                # Apply correct implementation based on version
+                                if ZA_REGRESSION_SUPPORTED:
+                                    # New API with regression parameter (version 5.0.0+)
+                                    za = ZivotAndrews(ts, regression=za_regression, lags=lags)
+                                    regression_type = za_regression
+                                else:
+                                    # Old API without regression parameter (version < 5.0.0)
+                                    za = ZivotAndrews(ts, lags=lags)
+                                    regression_type = 'Default (Constant & Trend Break)'
+                                
+                                # Handle breakpoint detection for different versions
+                                try:
+                                    # New versions have break_idx attribute
+                                    break_idx = za.break_idx
+                                except AttributeError:
+                                    # Older versions - need to compute from stats
+                                    if hasattr(za, 'stats') and len(za.stats) > 0:
+                                        break_idx = np.argmin(za.stats)
+                                        # Adjust for trimming (standard 15% trim in ZA)
+                                        trim = int(len(ts) * 0.15)
+                                        break_idx += trim  # Adjust index to account for trimming
+                                        if break_idx >= len(ts):  # Safety check
+                                            break_idx = len(ts) - 1
+                                    else:
+                                        break_idx = None
+                                
+                                # Get the date corresponding to the breakpoint
                                 breakpoint_date = ts.index[break_idx] if break_idx is not None and break_idx < len(ts) else None
-                                used_lags = za.lags if method else lags
+                                
+                                # Store results
+                                za_display_type = {
+                                    "c": "Break in Constant", 
+                                    "t": "Break in Trend", 
+                                    "ct": "Break in Constant & Trend"
+                                }.get(regression_type, regression_type)
                                 
                                 results['ZA'] = {
                                     'Test Statistic': za.stat,
                                     'p-value': za.pvalue,
                                     'Critical Values (5%)': za.critical_values['5%'],
-                                    'Lags': used_lags,
-                                    'Regression Type': za_regression,
+                                    'Lags': lags,
+                                    'Regression Type': za_display_type,
                                     'Breakpoint': breakpoint_date.strftime('%Y-%m-%d') if breakpoint_date else 'N/A'
                                 }
+                                
+                                # Add breakpoint to the list for visualization
                                 if breakpoint_date:
                                     breakpoints.append(('ZA', breakpoint_date))
                             
                             except Exception as e:
-                                st.warning(f"Zivot-Andrews test failed: {str(e)}. Ensure 'arch>=5.0.0' is installed. Skipping breakpoint detection.")
+                                st.warning(f"Zivot-Andrews test failed: {str(e)}. Try upgrading to arch>=5.0.0.")
                                 results['ZA'] = {
                                     'Test Statistic': None,
                                     'p-value': None,
                                     'Critical Values (5%)': None,
-                                    'Lags': lags if lag_method == "Fixed" else 'N/A',
-                                    'Regression Type': za_regression,
+                                    'Lags': lags,
+                                    'Regression Type': za_regression if ZA_REGRESSION_SUPPORTED else 'N/A',
                                     'Breakpoint': 'N/A'
                                 }
                         
                         if test_options['DFGLS']:
-                            trend = 'ct' if adf_regression in ['ct', 'ctt'] else 'c'
-                            method = lag_method.lower() if lag_method != "Fixed" else "aic"
-                            dfgls = DFGLS(ts, trend=trend, max_lags=lags if lag_method == "Fixed" else 20, method=method)
-                            used_lags = dfgls.lags
-                            results['DFGLS'] = {
-                                'Test Statistic': dfgls.stat,
-                                'p-value': dfgls.pvalue,
-                                'Critical Values (5%)': dfgls.critical_values['5%'],
-                                'Lags': used_lags,
-                                'Regression Type': trend,
-                                'Breakpoint': 'N/A'
-                            }
+                            try:
+                                dfgls = DFGLS(ts, trend=dfgls_regression, lags=lags)
+                                results['DFGLS'] = {
+                                    'Test Statistic': dfgls.stat,
+                                    'p-value': dfgls.pvalue,
+                                    'Critical Values (5%)': dfgls.critical_values['5%'],
+                                    'Lags': dfgls.lags,
+                                    'Regression Type': regression_type_display.get(dfgls_regression, dfgls_regression),
+                                    'Breakpoint': 'N/A'
+                                }
+                            except Exception as e:
+                                st.warning(f"DFGLS test failed: {str(e)}. Check parameter compatibility.")
+                                results['DFGLS'] = {
+                                    'Test Statistic': None,
+                                    'p-value': None,
+                                    'Critical Values (5%)': None,
+                                    'Lags': lags,
+                                    'Regression Type': dfgls_regression,
+                                    'Breakpoint': 'N/A'
+                                }
                         
                         if test_options['VR']:
-                            # Variance Ratio doesn't support automatic lag selection
-                            used_lags = lags if lag_method == "Fixed" else 4  # Default to 4 if AIC/BIC
-                            vr = VarianceRatio(ts, lags=used_lags)
+                            vr = VarianceRatio(ts, lags=lags)
                             results['VR'] = {
                                 'Test Statistic': vr.stat,
                                 'p-value': vr.pvalue,
                                 'Critical Values (5%)': vr.critical_values['5%'],
-                                'Lags': used_lags,
-                                'Regression Type': 'N/A',
+                                'Lags': lags,
+                                'Regression Type': 'N/A (Not Applicable)',
                                 'Breakpoint': 'N/A'
                             }
                     
@@ -357,16 +430,26 @@ if uploaded_file:
                             st.info("No structural breaks detected. Run ZA test.")
                     
                     # Download results
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                        results_df.to_excel(writer, sheet_name='Results')
-                        ts.to_frame().to_excel(writer, sheet_name='Data')
-                    
+                    st.subheader("📥 Download Results")
+
+                    # CSV download option (doesn't require xlsxwriter)
+                    csv_buffer = io.BytesIO()
+                    results_df.to_csv(csv_buffer)
                     st.download_button(
-                        "📊 Download Excel Report",
-                        excel_buffer.getvalue(),
-                        f"unit_root_results_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.ms-excel"
+                        "📊 Download Results CSV",
+                        csv_buffer.getvalue(),
+                        f"unit_root_results_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+
+                    # Also offer time series data download
+                    data_buffer = io.BytesIO()
+                    ts.to_frame().to_csv(data_buffer)
+                    st.download_button(
+                        "📈 Download Time Series Data",
+                        data_buffer.getvalue(),
+                        f"time_series_data_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
                     )
                 
                 except Exception as e:
@@ -398,11 +481,16 @@ else:
 
 # Instructions
 with st.expander("📚 Instructions"):
-    st.markdown("""
+    st.markdown(f"""
     1. Upload a CSV/Excel file with time series data
     2. Select date and value columns
-    3. Choose tests, lag selection method, and parameters
+    3. Choose tests and set number of lags
     4. Run analysis and download results
+    
+    **Important Note About Zivot-Andrews Test**:
+    - Your current arch version is: {'.'.join(str(x) for x in arch_version)}
+    - For full Zivot-Andrews functionality with break type selection, you need arch version 5.0.0 or higher
+    - To upgrade: `pip install arch>=5.0.0`
     
     **Supported Date Formats**:
     - Daily: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY
@@ -410,26 +498,16 @@ with st.expander("📚 Instructions"):
     - Quarterly: YYYYQ1, YYYY-Q1
     - Yearly: YYYY
     
-    **Lag Selection Methods**:
-    - **Fixed**: Specify a fixed number of lags.
-    - **AIC**: Select lags using Akaike Information Criterion (minimizes information loss).
-    - **BIC**: Select lags using Bayesian Information Criterion (penalizes complexity).
-    - Note: Variance Ratio test uses fixed lags only (defaults to 4 for AIC/BIC).
-    
     **Dependencies**:
-    - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch>=5.0.0 xlsxwriter`
-    - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository:
-      ```
-      streamlit
-      pandas
-      numpy
-      matplotlib
-      seaborn
-      statsmodels
-      arch>=5.0.0
-      xlsxwriter
-      ```
-    - Zivot-Andrews requires `arch>=5.0.0` for break type selection (Constant, Trend, or Both) and reliable breakpoint detection.
+    ```
+    streamlit
+    pandas
+    numpy
+    matplotlib
+    seaborn
+    statsmodels
+    arch>=5.0.0
+    ```
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.14.0")
+st.markdown("© 2025 Unit Root Test App | v2.11.0")
