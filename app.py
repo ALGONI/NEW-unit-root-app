@@ -56,108 +56,114 @@ st.markdown("""
 
 # Sidebar configuration
 st.sidebar.title("📊 Test Configuration")
-st.sidebar.subheader("Select Analysis Options")
+
+# NEW: Select Analysis Types - This is the key change
+st.sidebar.subheader("Select Analysis Types")
 analysis_options = {
     'Descriptive': st.sidebar.checkbox("Descriptive Statistics", value=True),
-    'ADF': st.sidebar.checkbox("Augmented Dickey-Fuller (ADF)", value=True),
-    'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
-    'KPSS': st.sidebar.checkbox("KPSS", value=True),
-    'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
-    'VR': st.sidebar.checkbox("Variance Ratio", value=False)
+    'UnitRoot': st.sidebar.checkbox("Unit Root Tests", value=True)
 }
 
-# Descriptive statistics options
-if analysis_options['Descriptive']:
-    st.sidebar.subheader("Descriptive Statistics Options")
-    stat_options = [
-        'Observation Count', 'Mean', 'Std', 'Min', 'Max', 
-        'Skewness', 'Kurtosis', 'JB Statistic', 'JB p-value', 'Normal'
-    ]
-    selected_stats = st.sidebar.multiselect(
-        "Select Statistics to Display",
-        options=stat_options,
-        default=['Observation Count', 'Mean', 'Std', 'Min', 'Max', 
-                 'Skewness', 'Kurtosis', 'JB Statistic', 'JB p-value', 'Normal']
-    )
+# Only show unit root test options if UnitRoot is selected
+if analysis_options['UnitRoot']:
+    st.sidebar.subheader("Select Unit Root Tests")
+    test_options = {
+        'ADF': st.sidebar.checkbox("Augmented Dickey-Fuller (ADF)", value=True),
+        'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
+        'KPSS': st.sidebar.checkbox("KPSS", value=True),
+        'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
+        'VR': st.sidebar.checkbox("Variance Ratio", value=False)
+    }
 else:
-    selected_stats = []
+    test_options = {
+        'ADF': False, 'PP': False, 'KPSS': False, 'DFGLS': False, 'VR': False
+    }
 
 # Data differencing option
 st.sidebar.subheader("Differencing Level")
 diff_options = ["Level (No Differencing)", "First Difference", "Second Difference"]
 diff_selection = st.sidebar.radio("Select Differencing Level", diff_options)
 
-# Test parameters
-st.sidebar.subheader("Test Parameters")
+# Test parameters - Only show if unit root tests are selected
+if analysis_options['UnitRoot']:
+    st.sidebar.subheader("Test Parameters")
 
-# Define lag selection criteria options
-lag_criteria_options = {
-    "Fixed": "Fixed Value",
-    "AIC": "Akaike Information Criterion (AIC)",
-    "BIC": "Bayesian Information Criterion (BIC)",
-    "t-stat": "t-statistic significance",
-    "None": "Let test decide (default)"
-}
+    # Define lag selection criteria options
+    lag_criteria_options = {
+        "Fixed": "Fixed Value",
+        "AIC": "Akaike Information Criterion (AIC)",
+        "BIC": "Bayesian Information Criterion (BIC)",
+        "t-stat": "t-statistic significance",
+        "None": "Let test decide (default)"
+    }
 
-# Lag selection method
-lag_selection_method = st.sidebar.selectbox(
-    "Lag Selection Method",
-    options=list(lag_criteria_options.keys()),
-    format_func=lambda x: lag_criteria_options[x],
-    index=0
-)
+    # Lag selection method
+    lag_selection_method = st.sidebar.selectbox(
+        "Lag Selection Method",
+        options=list(lag_criteria_options.keys()),
+        format_func=lambda x: lag_criteria_options[x],
+        index=0
+    )
 
-# Only show max lag parameter if using Fixed or other methods (except None)
-if lag_selection_method != "None":
-    max_lags = st.sidebar.number_input(
-        "Maximum Lags" if lag_selection_method != "Fixed" else "Fixed Lags",
-        min_value=0,
-        max_value=30,
-        value=4
+    # Only show max lag parameter if using Fixed or other methods (except None)
+    if lag_selection_method != "None":
+        max_lags = st.sidebar.number_input(
+            "Maximum Lags" if lag_selection_method != "Fixed" else "Fixed Lags",
+            min_value=0,
+            max_value=30,
+            value=4
+        )
+    else:
+        max_lags = None
+
+    # Define regression type mapping (for display)
+    regression_type_display = {
+        "c": "Constant Only",
+        "ct": "Constant & Trend",
+        "n": "No Constant or Trend",
+        "ctt": "Constant, Linear & Quadratic Trend"
+    }
+
+    # Standardized regression type options for most tests
+    regression_options = ["c", "ct", "n", "ctt"]
+    adf_regression = st.sidebar.selectbox(
+        "ADF Regression Type",
+        options=regression_options,
+        format_func=lambda x: regression_type_display.get(x, x),
+        index=1  # Default to constant & trend
+    )
+
+    # For KPSS: Only c and ct are supported
+    kpss_regression = st.sidebar.selectbox(
+        "KPSS Regression Type",
+        options=["c", "ct"],
+        format_func=lambda x: regression_type_display.get(x, x),
+        index=0  # Default to constant only
+    )
+
+    # Phillips-Perron: Same options as ADF
+    pp_regression = st.sidebar.selectbox(
+        "Phillips-Perron Regression Type",
+        options=regression_options,
+        format_func=lambda x: regression_type_display.get(x, x),
+        index=1  # Default to constant & trend
+    )
+
+    # For DFGLS: Only c and ct are supported
+    dfgls_regression = st.sidebar.selectbox(
+        "DFGLS Regression Type",
+        options=["c", "ct"],
+        format_func=lambda x: regression_type_display.get(x, x),
+        index=1  # Default to constant & trend
     )
 else:
-    max_lags = None
-
-# Define regression type mapping (for display)
-regression_type_display = {
-    "c": "Constant Only",
-    "ct": "Constant & Trend",
-    "n": "No Constant or Trend",
-    "ctt": "Constant, Linear & Quadratic Trend"
-}
-
-# Standardized regression type options for most tests
-regression_options = ["c", "ct", "n", "ctt"]
-adf_regression = st.sidebar.selectbox(
-    "ADF Regression Type",
-    options=regression_options,
-    format_func=lambda x: regression_type_display.get(x, x),
-    index=1  # Default to constant & trend
-)
-
-# For KPSS: Only c and ct are supported
-kpss_regression = st.sidebar.selectbox(
-    "KPSS Regression Type",
-    options=["c", "ct"],
-    format_func=lambda x: regression_type_display.get(x, x),
-    index=0  # Default to constant only
-)
-
-# Phillips-Perron: Same options as ADF
-pp_regression = st.sidebar.selectbox(
-    "Phillips-Perron Regression Type",
-    options=regression_options,
-    format_func=lambda x: regression_type_display.get(x, x),
-    index=1  # Default to constant & trend
-)
-
-# For DFGLS: Only c and ct are supported
-dfgls_regression = st.sidebar.selectbox(
-    "DFGLS Regression Type",
-    options=["c", "ct"],
-    format_func=lambda x: regression_type_display.get(x, x),
-    index=1  # Default to constant & trend
-)
+    # Default values for unit root tests if not selected
+    lag_selection_method = "Fixed"
+    max_lags = 4
+    adf_regression = "ct"
+    kpss_regression = "c"
+    pp_regression = "ct"
+    dfgls_regression = "ct"
 
 # Main content
 st.title("📊 Advanced Unit Root Test Application")
@@ -278,50 +284,6 @@ if uploaded_file:
                 if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
                     with st.spinner("Processing data..."):
                         try:
-                            # Compute descriptive statistics for all selected columns
-                            desc_stats_all = {}
-                            
-                            for col in value_cols:
-                                ts = df[col]
-                                
-                                # Apply differencing based on selection
-                                if diff_selection == "First Difference":
-                                    ts_diff = ts.diff().dropna()
-                                    suffix = " (Δ)"
-                                elif diff_selection == "Second Difference":
-                                    ts_diff = ts.diff().diff().dropna()
-                                    suffix = " (Δ²)"
-                                else:  # Level (No Differencing)
-                                    ts_diff = ts
-                                    suffix = ""
-                                
-                                # Run Jarque-Bera test for normality
-                                jb_stat, jb_pval = jarque_bera(ts_diff.dropna())
-                                
-                                # Calculate stats for the (possibly differenced) series
-                                desc_stats_all[col + suffix] = {
-                                    'Observation Count': ts_diff.count(),
-                                    'Mean': ts_diff.mean(),
-                                    'Std': ts_diff.std(),
-                                    'Min': ts_diff.min(),
-                                    'Max': ts_diff.max(),
-                                    'Skewness': skew(ts_diff),
-                                    'Kurtosis': kurtosis(ts_diff, fisher=True),
-                                    'JB Statistic': jb_stat,
-                                    'JB p-value': jb_pval,
-                                    'Normal': "Yes" if jb_pval > 0.05 else "No"
-                                }
-                            
-                            # Filter stats based on user selection
-                            if selected_stats:
-                                desc_stats_filtered = {
-                                    col: {stat: values[stat] for stat in selected_stats}
-                                    for col, values in desc_stats_all.items()
-                                }
-                                desc_stats_df = pd.DataFrame(desc_stats_filtered)
-                            else:
-                                desc_stats_df = pd.DataFrame(desc_stats_all)
-                            
                             # Select the TS for the selected variable and apply differencing
                             ts = apply_differencing(df[selected_var], diff_selection)
                             
@@ -336,38 +298,78 @@ if uploaded_file:
                                 st.error("Value column must contain numeric data.")
                                 st.stop()
                             
-                            # Determine appropriate lag selection parameters based on method
-                            if lag_selection_method == "None":
-                                autolag = 'AIC'  # Default method
-                                max_lag = None
-                            elif lag_selection_method == "Fixed":
-                                autolag = None
-                                max_lag = max_lags
-                            else:
-                                autolag = lag_selection_method.lower()
-                                max_lag = max_lags
-                            
-                            # Create tabs for different analysis outputs
+                            # Create tabs based on selected analysis types
                             tabs = []
                             if analysis_options['Descriptive']:
                                 tabs.append("Descriptive Statistics")
-                            if any(analysis_options[test] for test in ['ADF', 'PP', 'KPSS', 'DFGLS', 'VR']):
+                            if analysis_options['UnitRoot']:
                                 tabs.append("Unit Root Tests")
-                            if len(tabs) == 0:
-                                st.warning("No analysis options selected. Please select at least one option.")
+                            
+                            if not tabs:
+                                st.warning("Please select at least one analysis type.")
                                 st.stop()
                                 
+                            tab_index = 0
                             analysis_tabs = st.tabs(tabs)
                             
-                            tab_index = 0
                             # Descriptive Statistics Tab
                             if analysis_options['Descriptive']:
                                 with analysis_tabs[tab_index]:
+                                    # Compute descriptive statistics for all selected columns
+                                    desc_stats_all = {}
+                                    
+                                    for col in value_cols:
+                                        ts_col = df[col]
+                                        
+                                        # Apply differencing based on selection
+                                        if diff_selection == "First Difference":
+                                            ts_diff = ts_col.diff().dropna()
+                                            suffix = " (Δ)"
+                                        elif diff_selection == "Second Difference":
+                                            ts_diff = ts_col.diff().diff().dropna()
+                                            suffix = " (Δ²)"
+                                        else:  # Level (No Differencing)
+                                            ts_diff = ts_col
+                                            suffix = ""
+                                        
+                                        # Run Jarque-Bera test for normality
+                                        jb_stat, jb_pval = jarque_bera(ts_diff.dropna())
+                                        
+                                        # Calculate stats for the (possibly differenced) series
+                                        desc_stats_all[col + suffix] = {
+                                            'Count': ts_diff.count(),
+                                            'Mean': ts_diff.mean(),
+                                            'Std': ts_diff.std(),
+                                            'Min': ts_diff.min(),
+                                            '25%': ts_diff.quantile(0.25),
+                                            '50%': ts_diff.quantile(0.50),
+                                            '75%': ts_diff.quantile(0.75),
+                                            'Max': ts_diff.max(),
+                                            'Skewness': skew(ts_diff),
+                                            'Kurtosis': kurtosis(ts_diff, fisher=True),
+                                            'JB Stat': jb_stat,
+                                            'JB p-value': jb_pval,
+                                            'Normal': "Yes" if jb_pval > 0.05 else "No"
+                                        }
+                                    
+                                    # Create a DataFrame from the descriptive statistics
+                                    desc_stats_df = pd.DataFrame(desc_stats_all)
+                                    
                                     st.subheader(f"📊 Descriptive Statistics: {display_title}")
-                                    if selected_stats:
-                                        st.dataframe(desc_stats_df.style.format("{:.4f}"))
-                                    else:
-                                        st.warning("No descriptive statistics selected. Please select at least one statistic to display.")
+                                    st.dataframe(desc_stats_df.style.format("{:.4f}"))
+                                    
+                                    # Show JB test results more prominently
+                                    st.subheader("Jarque-Bera Test for Normality")
+                                    jb_results = pd.DataFrame({
+                                        'Variable': [k for k in desc_stats_all.keys()],
+                                        'JB Statistic': [v['JB Stat'] for v in desc_stats_all.values()],
+                                        'p-value': [v['JB p-value'] for v in desc_stats_all.values()],
+                                        'Normally Distributed': [v['Normal'] for v in desc_stats_all.values()]
+                                    })
+                                    st.dataframe(jb_results.style.format({
+                                        'JB Statistic': '{:.4f}',
+                                        'p-value': '{:.4f}'
+                                    }))
                                     
                                     # Visualization of distribution
                                     st.subheader("Distribution Analysis")
@@ -396,11 +398,23 @@ if uploaded_file:
                                         f"descriptive_stats_{datetime.now().strftime('%Y%m%d')}.csv",
                                         mime="text/csv"
                                     )
+                                
                                 tab_index += 1
                             
                             # Unit Root Tests Tab
-                            if any(analysis_options[test] for test in ['ADF', 'PP', 'KPSS', 'DFGLS', 'VR']):
+                            if analysis_options['UnitRoot']:
                                 with analysis_tabs[tab_index]:
+                                    # Determine appropriate lag selection parameters based on method
+                                    if lag_selection_method == "None":
+                                        autolag = 'AIC'  # Default method
+                                        max_lag = None
+                                    elif lag_selection_method == "Fixed":
+                                        autolag = None
+                                        max_lag = max_lags
+                                    else:
+                                        autolag = lag_selection_method.lower()
+                                        max_lag = max_lags
+                                    
                                     # Visualizations for time series
                                     st.subheader(f"📉 Time Series Visualization: {display_title}")
                                     st_tabs = st.tabs(["Line Chart", "Interactive Chart"])
@@ -419,7 +433,7 @@ if uploaded_file:
                                     # Run unit root tests
                                     results = {}
                                     with st.spinner("Running unit root tests..."):
-                                        if analysis_options['ADF']:
+                                        if test_options['ADF']:
                                             adf_result = adfuller(
                                                 ts, 
                                                 regression=adf_regression, 
@@ -439,7 +453,7 @@ if uploaded_file:
                                                 'Regression Type': regression_type_display.get(adf_regression, adf_regression)
                                             }
                                         
-                                        if analysis_options['PP']:
+                                        if test_options['PP']:
                                             pp = PhillipsPerron(
                                                 ts, 
                                                 trend=pp_regression, 
@@ -454,7 +468,7 @@ if uploaded_file:
                                                 'Regression Type': regression_type_display.get(pp_regression, pp_regression)
                                             }
                                         
-                                        if analysis_options['KPSS']:
+                                        if test_options['KPSS']:
                                             # For KPSS, adapt lag method
                                             if lag_selection_method == "Fixed":
                                                 kpss_nlags = max_lags
@@ -475,7 +489,7 @@ if uploaded_file:
                                                 'Regression Type': regression_type_display.get(kpss_regression, kpss_regression)
                                             }
                                         
-                                        if analysis_options['DFGLS']:
+                                        if test_options['DFGLS']:
                                             try:
                                                 # For DFGLS, adapt lag selection method
                                                 if lag_selection_method == "Fixed":
@@ -523,7 +537,7 @@ if uploaded_file:
                                                     'Regression Type': dfgls_regression
                                                 }
                                         
-                                        if analysis_options['VR']:
+                                        if test_options['VR']:
                                             # Variance Ratio test
                                             vr_lags = max_lags if lag_selection_method == "Fixed" else None
                                             vr = VarianceRatio(ts, lags=vr_lags)
@@ -582,6 +596,8 @@ if uploaded_file:
                                         
                                         # Download results
                                         st.subheader("📥 Download Results")
+
+                                        # CSV download option (doesn't require xlsxwriter)
                                         csv_buffer = io.BytesIO()
                                         results_df.to_csv(csv_buffer)
                                         st.download_button(
@@ -643,30 +659,23 @@ with st.expander("📚 Instructions"):
     1. Upload a CSV/Excel file with time series data
     2. Select date and value column(s)
     3. Choose the differencing level (Level, First Difference, Second Difference)
-    4. Select analysis options (Descriptive Statistics and/or Unit Root Tests)
-    5. For Descriptive Statistics, select which statistics to display (e.g., Mean, Std, Skewness, etc.)
+    4. Select analysis types (Descriptive Statistics and/or Unit Root Tests)
+    5. If Unit Root Tests are selected, choose which tests to run
     6. Run analysis and download results
+    
+    **Analysis Types**:
+    - **Descriptive Statistics**: Summary statistics including mean, std, max, min, skewness, kurtosis, and Jarque-Bera test for normality
+    - **Unit Root Tests**: Tests for stationarity (ADF, PP, KPSS, DFGLS, VR)
     
     **Differencing Levels**:
     - **Level (No Differencing)**: Original data without transformation
     - **First Difference**: Changes between consecutive observations (Δyt = yt - yt-1)
     - **Second Difference**: Differences of differences (Δ²yt = Δyt - Δyt-1)
     
-    **Analysis Options**:
-    - **Descriptive Statistics**: Provides summary statistics including Jarque-Bera test for normality
-    - **Unit Root Tests**: Tests for stationarity (ADF, PP, KPSS, DFGLS, VR)
-    
-    **Descriptive Statistics Options**:
-    - **Observation Count**: Number of data points
-    - **Mean**: Average value
-    - **Std**: Standard deviation
-    - **Min**: Minimum value
-    - **Max**: Maximum value
-    - **Skewness**: Measure of asymmetry
-    - **Kurtosis**: Measure of tailedness
-    - **JB Statistic**: Jarque-Bera test statistic
-    - **JB p-value**: p-value for Jarque-Bera test
-    - **Normal**: Indicates if data is normally distributed (Yes if p-value > 0.05)
+    **Jarque-Bera Test**:
+    - Tests whether sample data has skewness and kurtosis matching a normal distribution
+    - Null hypothesis: data is normally distributed
+    - If p-value < 0.05, reject the null hypothesis (data is not normally distributed)
     
     **Lag Selection Methods**:
     - **Fixed Value**: Uses the exact number of lags you specify
@@ -681,14 +690,22 @@ with st.expander("📚 Instructions"):
     - Quarterly: YYYYQ1, YYYY-Q1
     - Yearly: YYYY
     
-    **Jarque-Bera Test**:
-    - Tests whether sample data has skewness and kurtosis matching a normal distribution
-    - Null hypothesis: data is normally distributed
-    - If p-value < 0.05, reject the null hypothesis (data is not normally distributed)
-    
     **Unit Root Tests Notes**:
     - ADF/PP/VR: Null hypothesis is non-stationarity (p < 0.05 indicates stationarity)
     - KPSS: Null hypothesis is stationarity (p < 0.05 indicates non-stationarity)
     - DFGLS: Requires at least 20 observations and only supports 'Constant' or 'Constant & Trend'
     
     **Dependencies**:
+    ```
+    streamlit
+    pandas
+    numpy
+    matplotlib
+    seaborn
+    statsmodels
+    arch
+    scipy
+    ```
+    """)
+
+st.markdown("© 2025 Unit Root Test App | v3.3.0")
