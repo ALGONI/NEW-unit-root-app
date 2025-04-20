@@ -219,7 +219,16 @@ if uploaded_file:
                         
                         if test_options['ZA']:
                             za = ZivotAndrews(ts, lags=lags)
-                            breakpoint_date = ts.index[za.break_idx] if za.break_idx is not None else None
+                            # Handle breakpoint detection for older arch versions
+                            try:
+                                break_idx = za.break_idx
+                            except AttributeError:
+                                # Manually find the break point by minimizing the test statistic
+                                if hasattr(za, 'stats') and len(za.stats) > 0:
+                                    break_idx = np.argmin(za.stats)
+                                else:
+                                    break_idx = None
+                            breakpoint_date = ts.index[break_idx] if break_idx is not None else None
                             results['ZA'] = {
                                 'Test Statistic': za.stat,
                                 'p-value': za.pvalue,
@@ -379,7 +388,7 @@ with st.expander("📚 Instructions"):
       arch
       xlsxwriter
       ```
-    - Zivot-Andrews test uses the default model (allows breaks in constant and trend).
+    - Zivot-Andrews test uses the default model (allows breaks in constant and trend). Breakpoint detection may vary slightly in older `arch` versions.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.9.0")
+st.markdown("© 2025 Unit Root Test App | v2.10.0")
