@@ -16,19 +16,35 @@ st.title("📊 Unit Root Test Application with Structural Breaks")
 uploaded_file = st.file_uploader("Upload a Time Series File (CSV or Excel, columns: date, value)", type=["csv", "xlsx"])
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    df.columns = [col.lower() for col in df.columns]
+    # STEP 1: Load CSV or Excel
+    if uploaded_file.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_file)
+    else:
+        df = pd.read_excel(uploaded_file)
 
-    if 'date' in df.columns and 'value' in df.columns:
-        df['date'] = pd.to_datetime(df['date'])
-        df.set_index('date', inplace=True)
-        ts = df['value'].dropna()
+    # STEP 2: Clean column names (lowercase, strip spaces)
+    df.columns = [col.strip().lower() for col in df.columns]
 
-        st.subheader("📈 Time Series Preview")
+    # STEP 3: Let user select which columns to use
+    st.subheader("📌 Select Columns")
+    date_col = st.selectbox("Select Date Column", options=df.columns)
+    value_col = st.selectbox("Select Value Column", options=df.columns)
+
+    try:
+        df[date_col] = pd.to_datetime(df[date_col])
+        df = df[[date_col, value_col]].dropna()
+        df.set_index(date_col, inplace=True)
+        ts = df[value_col]
+
+        st.subheader("📉 Time Series Preview")
         st.line_chart(ts, use_container_width=True)
 
         results = {}
 
+        # ✅ your test logic and plots can continue from here...
+
+    except Exception as e:
+        st.error(f"Error processing selected columns: {e}")
         # ADF Test
         adf_result = adfuller(ts, autolag='AIC')
         results['ADF'] = {'Test Statistic': adf_result[0], 'p-value': adf_result[1], 'Breakpoint': 'N/A'}
