@@ -11,7 +11,7 @@ from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 import warnings
 
 # Suppress warnings for cleaner output
-warnings.filterWarnings('ignore')
+warnings.filterwarnings('ignore')
 
 # Set professional plotting style
 plt.style.use('ggplot')
@@ -432,4 +432,4 @@ with st.expander("📚 Instructions"):
     - Zivot-Andrews requires `arch>=5.0.0` for break type selection (Constant, Trend, or Both) and reliable breakpoint detection.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.13.0")
+st.markdown("© 2025 Unit Root Test App | v2.14.0")
