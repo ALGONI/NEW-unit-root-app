@@ -136,11 +136,39 @@ if uploaded_file:
         
         if process_button:
             try:
-                # Data processing
-                df[date_col] = pd.to_datetime(df[date_col])
+                # Data processing with robust date parsing
+                try:
+                    # First attempt standard parsing
+                    df[date_col] = pd.to_datetime(df[date_col])
+                except ValueError as e:
+                    # Check for monthly format like '2013M01'
+                    if any(str(x).endswith('M01') or str(x).endswith('M12') for x in df[date_col].head()):
+                        st.info("Detected monthly format data. Attempting special parsing...")
+                        # Custom parse for monthly format 'YYYYMM' or 'YYYYMDD'
+                        df[date_col] = pd.to_datetime(df[date_col].astype(str).str.replace('M', '-'), format='%Y-%m', errors='coerce')
+                    else:
+                        # Try other common formats
+                        formats_to_try = ['%Y-%m', '%Y%m', '%Y/%m', '%Y.%m', '%Y-%m-%d', '%Y%m%d', '%m/%d/%Y', '%d/%m/%Y']
+                        for fmt in formats_to_try:
+                            try:
+                                df[date_col] = pd.to_datetime(df[date_col], format=fmt)
+                                st.success(f"Successfully parsed dates using format: {fmt}")
+                                break
+                            except:
+                                continue
+                        else:
+                            # If all parsing attempts fail, use pandas' flexible parser with error handling
+                            df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                            # Check for NaT and warn user
+                            if df[date_col].isna().any():
+                                st.warning(f"Some dates could not be parsed. {df[date_col].isna().sum()} rows will be dropped.")
+                
+                # Drop NaN values and set index
                 df = df[[date_col, value_col]].dropna()
                 df.set_index(date_col, inplace=True)
                 ts = df[value_col]
+                
+                st.success(f"Successfully processed {len(ts)} time series observations from {ts.index.min()} to {ts.index.max()}")
                 
                 st.subheader("📉 Time Series Visualization")
                 
