@@ -7,17 +7,9 @@ import io
 import matplotlib as mpl
 from datetime import datetime
 from statsmodels.tsa.stattools import adfuller, kpss
-from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
+from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio, LeeStrazicich
 from matplotlib.backends.backend_pdf import PdfPages
 import warnings
-
-# Check for ruptures availability
-try:
-    import ruptures as rpt
-    RUPTURES_AVAILABLE = True
-except ImportError:
-    RUPTURES_AVAILABLE = False
-    rpt = None
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -63,7 +55,7 @@ test_options = {
     'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
     'KPSS': st.sidebar.checkbox("KPSS", value=True),
     'ZA': st.sidebar.checkbox("Zivot-Andrews", value=True),
-    'BP': st.sidebar.checkbox("Bai-Perron (Structural Breaks)", value=True, disabled=not RUPTURES_AVAILABLE),
+    'LS': st.sidebar.checkbox("Lee-Strazicich (Structural Breaks)", value=True),
     'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
@@ -91,6 +83,12 @@ za_regression = st.sidebar.selectbox(
     format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
                           "ct": "Break in Constant & Trend"}.get(x),
     index=2
+)
+ls_model = st.sidebar.selectbox(
+    "Lee-Strazicich Model",
+    options=["crash", "break"],
+    format_func=lambda x: {"crash": "Crash Model (Level Shift)", "break": "Break Model (Level & Trend Shift)"}.get(x),
+    index=1
 )
 
 # Main content
@@ -170,11 +168,6 @@ if uploaded_file:
             value_col = st.selectbox("📈 Value Column", options=[col for col in df.columns if col != date_col])
         
         if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
-            # Check for Bai-Perron availability before starting analysis
-            if test_options['BP'] and not RUPTURES_AVAILABLE:
-                st.error("Bai-Perron test requires the 'ruptures' library. Please install it using 'pip install ruptures' or deselect the Bai-Perron test.")
-                st.stop()
-            
             with st.spinner("Processing data..."):
                 try:
                     # Parse dates
@@ -253,20 +246,25 @@ if uploaded_file:
                             if breakpoint_date:
                                 breakpoints.append(('ZA', breakpoint_date))
                         
-                        if test_options['BP'] and RUPTURES_AVAILABLE:
-                            algo = rpt.Pelt(model="l2").fit(ts.values)
-                            bp_indices = algo.predict(pen=10)
-                            bp_dates = [ts.index[i] for i in bp_indices if i < len(ts)]
-                            results['BP'] = {
-                                'Test Statistic': 'N/A',
-                                'p-value': 'N/A',
-                                'Critical Values (5%)': 'N/A',
-                                'Lags': 'N/A',
-                                'Regression Type': 'N/A',
-                                'Breakpoint': ', '.join([d.strftime('%Y-%m-%d') for d in bp_dates]) if bp_dates else 'N/A'
+                        if test_options['LS']:
+                            ls = LeeStrazicich(ts, model=ls_model, lags=lags)
+                            # Lee-Strazicich can detect up to two breaks
+                            break_dates = []
+                            if ls.break_idx1 is not None:
+                                break_dates.append(ts.index[ls.break_idx1])
+                            if ls.break_idx2 is not None:
+                                break_dates.append(ts.index[ls.break_idx2])
+                            break_dates_str = ', '.join([d.strftime('%Y-%m-%d') for d in break_dates]) if break_dates else 'N/A'
+                            results['LS'] = {
+                                'Test Statistic': ls.stat,
+                                'p-value': ls.pvalue,
+                                'Critical Values (5%)': ls.critical_values['5%'],
+                                'Lags': lags,
+                                'Model': ls_model,
+                                'Breakpoint': break_dates_str
                             }
-                            for bp_date in bp_dates:
-                                breakpoints.append(('BP', bp_date))
+                            for break_date in break_dates:
+                                breakpoints.append(('LS', break_date))
                         
                         if test_options['DFGLS']:
                             trend = 'ct' if adf_regression in ['ct', 'ctt'] else 'c'
@@ -308,8 +306,8 @@ if uploaded_file:
                     # Interpretation
                     st.subheader("🔍 Interpretation")
                     for test, values in results.items():
-                        if test == 'BP':
-                            st.markdown(f"• {test}: Detected breakpoints at {values['Breakpoint']}")
+                        if test == 'LS' and values['Breakpoint'] != 'N/A':
+                            st.markdown(f"• {test}: Detected breakpoints at {values['Breakpoint']} (p-value = {values['p-value']:.4f})")
                             continue
                         p_value = values['p-value']
                         if not isinstance(p_value, (int, float)):
@@ -350,7 +348,7 @@ if uploaded_file:
                             plt.title("Time Series with Structural Breaks")
                             st.pyplot(fig2)
                         else:
-                            st.info("No structural breaks detected. Run ZA or BP tests.")
+                            st.info("No structural breaks detected. Run ZA or LS tests.")
                     
                     # Download results
                     excel_buffer = io.BytesIO()
@@ -408,9 +406,17 @@ with st.expander("📚 Instructions"):
     
     **Dependencies**:
     - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch xlsxwriter`
-    - For Bai-Perron test: `pip install ruptures`
-    - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository.
-    - If `ruptures` is not installed, deselect the Bai-Perron test to avoid errors.
+    - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository:
+      ```
+      streamlit
+      pandas
+      numpy
+      matplotlib
+      seaborn
+      statsmodels
+      arch
+      xlsxwriter
+      ```
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.4.0")
+st.markdown("© 2025 Unit Root Test App | v2.5.0")
