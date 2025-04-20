@@ -68,10 +68,6 @@ test_options = {
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
 
-# Warn if Bai-Perron is selected but ruptures is not available
-if test_options['BP'] and not RUPTURES_AVAILABLE:
-    st.sidebar.warning("Bai-Perron test requires the 'ruptures' library. Please install it using 'pip install ruptures'.")
-
 # Test parameters
 st.sidebar.subheader("Test Parameters")
 lags = st.sidebar.number_input("Number of Lags for All Tests", min_value=1, max_value=20, value=4, step=1)
@@ -174,6 +170,11 @@ if uploaded_file:
             value_col = st.selectbox("📈 Value Column", options=[col for col in df.columns if col != date_col])
         
         if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
+            # Check for Bai-Perron availability before starting analysis
+            if test_options['BP'] and not RUPTURES_AVAILABLE:
+                st.error("Bai-Perron test requires the 'ruptures' library. Please install it using 'pip install ruptures' or deselect the Bai-Perron test.")
+                st.stop()
+            
             with st.spinner("Processing data..."):
                 try:
                     # Parse dates
@@ -408,7 +409,8 @@ with st.expander("📚 Instructions"):
     **Dependencies**:
     - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch xlsxwriter`
     - For Bai-Perron test: `pip install ruptures`
-    - For Streamlit Cloud, add these to a `requirements.txt` file.
+    - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository.
+    - If `ruptures` is not installed, deselect the Bai-Perron test to avoid errors.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.3.0")
+st.markdown("© 2025 Unit Root Test App | v2.4.0")
