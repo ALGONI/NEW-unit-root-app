@@ -75,6 +75,25 @@ kpss_regression = st.sidebar.selectbox(
     format_func=lambda x: {"c": "Constant", "ct": "Constant & Trend"}.get(x),
     index=0
 )
+za_regression = st.sidebar.selectbox(
+    "Zivot-Andrews Regression",
+    options=["c", "t", "ct"],
+    format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
+                          "ct": "Break in Constant & Trend"}.get(x),
+    index=2
+)
+
+# Check arch version for Zivot-Andrews compatibility
+try:
+    import arch
+    arch_version = tuple(int(x) for x in arch.__version__.split('.'))
+    ZA_REGRESSION_SUPPORTED = arch_version >= (5, 0, 0)
+except:
+    ZA_REGRESSION_SUPPORTED = False
+    arch_version = (0, 0, 0)
+
+if not ZA_REGRESSION_SUPPORTED:
+    st.sidebar.warning("Zivot-Andrews break type selection requires 'arch' version 5.0.0 or later. Using default model (Constant & Trend Break). Install with 'pip install arch>=5.0.0'.")
 
 # Main content
 st.title("📊 Advanced Unit Root Test Application")
@@ -218,27 +237,54 @@ if uploaded_file:
                             }
                         
                         if test_options['ZA']:
-                            za = ZivotAndrews(ts, lags=lags)
-                            # Handle breakpoint detection for older arch versions
+                            # Handle Zivot-Andrews for different arch versions
                             try:
-                                break_idx = za.break_idx
-                            except AttributeError:
-                                # Manually find the break point by minimizing the test statistic
-                                if hasattr(za, 'stats') and len(za.stats) > 0:
-                                    break_idx = np.argmin(za.stats)
+                                if ZA_REGRESSION_SUPPORTED:
+                                    za = ZivotAndrews(ts, regression=za_regression, lags=lags)
+                                    regression_type = za_regression
                                 else:
-                                    break_idx = None
-                            breakpoint_date = ts.index[break_idx] if break_idx is not None else None
-                            results['ZA'] = {
-                                'Test Statistic': za.stat,
-                                'p-value': za.pvalue,
-                                'Critical Values (5%)': za.critical_values['5%'],
-                                'Lags': lags,
-                                'Regression Type': 'Default (Constant & Trend Break)',
-                                'Breakpoint': breakpoint_date.strftime('%Y-%m-%d') if breakpoint_date else 'N/A'
-                            }
-                            if breakpoint_date:
-                                breakpoints.append(('ZA', breakpoint_date))
+                                    za = ZivotAndrews(ts, lags=lags)
+                                    regression_type = 'Default (Constant & Trend Break)'
+                                
+                                # Try to get breakpoint
+                                try:
+                                    break_idx = za.break_idx
+                                except AttributeError:
+                                    # Manual breakpoint detection for older arch
+                                    if hasattr(za, 'stats') and len(za.stats) > 0:
+                                        break_idx = np.argmin(za.stats)
+                                        # Adjust for trimming (Zivot-Andrews trims data)
+                                        trim = int(len(ts) * 0.15)  # Default 15% trim
+                                        if break_idx < len(za.stats):
+                                            break_idx += trim  # Shift index to account for trim
+                                        else:
+                                            break_idx = None
+                                    else:
+                                        break_idx = None
+                                
+                                breakpoint_date = ts.index[break_idx] if break_idx is not None and break_idx < len(ts) else None
+                                
+                                results['ZA'] = {
+                                    'Test Statistic': za.stat,
+                                    'p-value': za.pvalue,
+                                    'Critical Values (5%)': za.critical_values['5%'],
+                                    'Lags': lags,
+                                    'Regression Type': regression_type,
+                                    'Breakpoint': breakpoint_date.strftime('%Y-%m-%d') if breakpoint_date else 'N/A'
+                                }
+                                if breakpoint_date:
+                                    breakpoints.append(('ZA', breakpoint_date))
+                            
+                            except Exception as e:
+                                st.warning(f"Zivot-Andrews test failed: {str(e)}. Skipping breakpoint detection.")
+                                results['ZA'] = {
+                                    'Test Statistic': None,
+                                    'p-value': None,
+                                    'Critical Values (5%)': None,
+                                    'Lags': lags,
+                                    'Regression Type': regression_type,
+                                    'Breakpoint': 'N/A'
+                                }
                         
                         if test_options['DFGLS']:
                             trend = 'ct' if adf_regression in ['ct', 'ctt'] else 'c'
@@ -377,6 +423,7 @@ with st.expander("📚 Instructions"):
     
     **Dependencies**:
     - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch xlsxwriter`
+    - For full Zivot-Andrews functionality (break type selection), use `arch>=5.0.0`: `pip install arch>=5.0.0`
     - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository:
       ```
       streamlit
@@ -385,10 +432,10 @@ with st.expander("📚 Instructions"):
       matplotlib
       seaborn
       statsmodels
-      arch
+      arch>=5.0.0
       xlsxwriter
       ```
-    - Zivot-Andrews test uses the default model (allows breaks in constant and trend). Breakpoint detection may vary slightly in older `arch` versions.
+    - If using an older `arch` version (<5.0.0), Zivot-Andrews uses the default model (Constant & Trend Break), and breakpoint detection may be less precise.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.10.0")
+st.markdown("© 2025 Unit Root Test App | v2.11.0")
