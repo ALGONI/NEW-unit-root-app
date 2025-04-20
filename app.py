@@ -540,17 +540,45 @@ if uploaded_file:
                                                 }
                                         
                                         if test_options['VR']:
-                                            # Variance Ratio test
-                                            vr_lags = max_lags if lag_selection_method == "Fixed" else None
-                                            vr = VarianceRatio(ts, lags=vr_lags)
-                                            results['VR'] = {
-                                                'Test Statistic': vr.stat,
-                                                'p-value': vr.pvalue,
-                                                'Critical Values (5%)': vr.critical_values['5%'],
-                                                'Lags': vr.lags,
-                                                'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Default",
-                                                'Regression Type': 'N/A (Not Applicable)'
-                                            }
+                                            try:
+                                                # Variance Ratio test
+                                                vr_lags = max_lags if lag_selection_method == "Fixed" else None
+                                                
+                                                # Safe handling for VR test
+                                                vr = VarianceRatio(ts, lags=vr_lags)
+                                                results['VR'] = {
+                                                    'Test Statistic': vr.stat,
+                                                    'p-value': vr.pvalue,
+                                                    'Critical Values (5%)': vr.critical_values['5%'],
+                                                    'Lags': vr.lags,
+                                                    'Lag Method': "Fixed" if lag_selection_method == "Fixed" else "Default",
+                                                    'Regression Type': 'N/A (Not Applicable)'
+                                                }
+                                            except Exception as e:
+                                                st.warning(f"Variance Ratio test failed: {str(e)}. Using default lag value.")
+                                                # Try with a safe default lag value
+                                                try:
+                                                    # Use a simple default lag value that's likely to work
+                                                    default_lag = min(int(np.sqrt(len(ts))), 10)
+                                                    vr = VarianceRatio(ts, lags=default_lag)
+                                                    results['VR'] = {
+                                                        'Test Statistic': vr.stat,
+                                                        'p-value': vr.pvalue,
+                                                        'Critical Values (5%)': vr.critical_values['5%'],
+                                                        'Lags': vr.lags,
+                                                        'Lag Method': "Default",
+                                                        'Regression Type': 'N/A (Not Applicable)'
+                                                    }
+                                                except Exception as e2:
+                                                    st.warning(f"Variance Ratio test failed with default settings: {str(e2)}.")
+                                                    results['VR'] = {
+                                                        'Test Statistic': None,
+                                                        'p-value': None,
+                                                        'Critical Values (5%)': None,
+                                                        'Lags': None,
+                                                        'Lag Method': "Failed",
+                                                        'Regression Type': 'N/A (Not Applicable)'
+                                                    }
                                     
                                     if not results:
                                         st.warning("No unit root tests selected. Please select at least one test.")
