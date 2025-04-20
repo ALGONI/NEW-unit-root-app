@@ -13,7 +13,7 @@ from arch.unitroot import PhillipsPerron, ZivotAndrews
 st.set_page_config(page_title="Unit Root Test App", layout="wide")
 st.title("📊 Unit Root Test Application with Structural Breaks")
 
-uploaded_file = st.file_uploader("Upload a Time Series CSV (columns: date, value)", type=["csv"])
+uploaded_file = st.file_uploader("Upload a Time Series File (CSV or Excel, columns: date, value)", type=["csv", "xlsx"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
