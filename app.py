@@ -10,14 +10,6 @@ from statsmodels.tsa.stattools import adfuller, kpss
 from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 import warnings
 
-# Try to import LeeStrazicich, with fallback
-try:
-    from arch.unitroot import LeeStrazicich
-    LEE_STRAZICICH_AVAILABLE = True
-except ImportError:
-    LEE_STRAZICICH_AVAILABLE = False
-    LeeStrazicich = None
-
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
 
@@ -62,14 +54,9 @@ test_options = {
     'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
     'KPSS': st.sidebar.checkbox("KPSS", value=True),
     'ZA': st.sidebar.checkbox("Zivot-Andrews", value=True),
-    'LS': st.sidebar.checkbox("Lee-Strazicich (Structural Breaks)", value=True, disabled=not LEE_STRAZICICH_AVAILABLE),
     'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
-
-# Warn if Lee-Strazicich is unavailable
-if not LEE_STRAZICICH_AVAILABLE:
-    st.sidebar.warning("Lee-Strazicich test requires 'arch' version 5.0.0 or later. Install it with 'pip install arch>=5.0.0' or deselect the test.")
 
 # Test parameters
 st.sidebar.subheader("Test Parameters")
@@ -94,13 +81,6 @@ za_regression = st.sidebar.selectbox(
     format_func=lambda x: {"c": "Break in Constant", "t": "Break in Trend", 
                           "ct": "Break in Constant & Trend"}.get(x),
     index=2
-)
-ls_model = st.sidebar.selectbox(
-    "Lee-Strazicich Model",
-    options=["crash", "break"],
-    format_func=lambda x: {"crash": "Crash Model (Level Shift)", "break": "Break Model (Level & Trend Shift)"}.get(x),
-    index=1,
-    disabled=not LEE_STRAZICICH_AVAILABLE
 )
 
 # Main content
@@ -180,11 +160,6 @@ if uploaded_file:
             value_col = st.selectbox("📈 Value Column", options=[col for col in df.columns if col != date_col])
         
         if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
-            # Check for Lee-Strazicich availability before starting analysis
-            if test_options['LS'] and not LEE_STRAZICICH_AVAILABLE:
-                st.error("Lee-Strazicich test requires 'arch' version 5.0.0 or later. Please upgrade using 'pip install --upgrade arch' or deselect the Lee-Strazicich test.")
-                st.stop()
-            
             with st.spinner("Processing data..."):
                 try:
                     # Parse dates
@@ -263,25 +238,6 @@ if uploaded_file:
                             if breakpoint_date:
                                 breakpoints.append(('ZA', breakpoint_date))
                         
-                        if test_options['LS'] and LEE_STRAZICICH_AVAILABLE:
-                            ls = LeeStrazicich(ts, model=ls_model, lags=lags)
-                            break_dates = []
-                            if ls.break_idx1 is not None:
-                                break_dates.append(ts.index[ls.break_idx1])
-                            if ls.break_idx2 is not None:
-                                break_dates.append(ts.index[ls.break_idx2])
-                            break_dates_str = ', '.join([d.strftime('%Y-%m-%d') for d in break_dates]) if break_dates else 'N/A'
-                            results['LS'] = {
-                                'Test Statistic': ls.stat,
-                                'p-value': ls.pvalue,
-                                'Critical Values (5%)': ls.critical_values['5%'],
-                                'Lags': ls.lags,
-                                'Model': ls_model,
-                                'Breakpoint': break_dates_str
-                            }
-                            for break_date in break_dates:
-                                breakpoints.append(('LS', break_date))
-                        
                         if test_options['DFGLS']:
                             trend = 'ct' if adf_regression in ['ct', 'ctt'] else 'c'
                             dfgls = DFGLS(ts, trend=trend, max_lags=lags, method='aic')
@@ -322,9 +278,6 @@ if uploaded_file:
                     # Interpretation
                     st.subheader("🔍 Interpretation")
                     for test, values in results.items():
-                        if test == 'LS' and values['Breakpoint'] != 'N/A':
-                            st.markdown(f"• {test}: Detected breakpoints at {values['Breakpoint']} (p-value = {values['p-value']:.4f})")
-                            continue
                         p_value = values['p-value']
                         if not isinstance(p_value, (int, float)):
                             continue
@@ -358,13 +311,13 @@ if uploaded_file:
                             fig2, ax2 = plt.subplots(figsize=(10, 5))
                             ax2.plot(ts.index, ts.values, label='Time Series')
                             for test_name, bp_date in breakpoints:
-                                ax2.axvline(bp_date, color='red' if test_name == 'ZA' else 'blue', 
-                                           linestyle='--', label=f'{test_name} Break: {bp_date.strftime("%Y-%m-%d")}')
+                                ax2.axvline(bp_date, color='red', linestyle='--', 
+                                           label=f'ZA Break: {bp_date.strftime("%Y-%m-%d")}')
                             ax2.legend()
                             plt.title("Time Series with Structural Breaks")
                             st.pyplot(fig2)
                         else:
-                            st.info("No structural breaks detected. Run ZA or LS tests.")
+                            st.info("No structural breaks detected. Run ZA test.")
                     
                     # Download results
                     excel_buffer = io.BytesIO()
@@ -422,7 +375,6 @@ with st.expander("📚 Instructions"):
     
     **Dependencies**:
     - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch xlsxwriter`
-    - For Lee-Strazicich test, ensure `arch` version 5.0.0 or later: `pip install arch>=5.0.0`
     - For Streamlit Cloud, add these to a `requirements.txt` file in your GitHub repository:
       ```
       streamlit
@@ -431,10 +383,9 @@ with st.expander("📚 Instructions"):
       matplotlib
       seaborn
       statsmodels
-      arch>=5.0.0
+      arch
       xlsxwriter
       ```
-    - If Lee-Strazicich is unavailable, deselect the test to avoid errors.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.7.0")
+st.markdown("© 2025 Unit Root Test App | v2.8.0")
