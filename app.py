@@ -7,6 +7,7 @@ import io
 import matplotlib as mpl
 from datetime import datetime
 from statsmodels.tsa.stattools import adfuller, kpss
+from scipy.stats import skew, kurtosis
 import warnings
 
 # Import arch and check version
@@ -212,17 +213,57 @@ if uploaded_file:
         with col2:
             value_col = st.selectbox("📈 Value Column", options=[col for col in df.columns if col != date_col])
         
+        # Descriptive Statistics
+        try:
+            # Parse dates and prepare time series
+            df[date_col] = parse_dates(df[date_col])
+            df = df[[date_col, value_col]].dropna()
+            df.set_index(date_col, inplace=True)
+            ts = df[value_col]
+            
+            # Compute descriptive statistics
+            desc_stats = {
+                'Count': ts.count(),
+                'Mean': ts.mean(),
+                'Std': ts.std(),
+                'Min': ts.min(),
+                '25%': ts.quantile(0.25),
+                '50%': ts.quantile(0.50),
+                '75%': ts.quantile(0.75),
+                'Max': ts.max(),
+                'Skewness': skew(ts),
+                'Kurtosis': kurtosis(ts, fisher=True)
+            }
+            desc_stats_df = pd.DataFrame(desc_stats, index=['Value']).T
+            
+            with st.expander("📊 Descriptive Statistics", expanded=True):
+                st.dataframe(desc_stats_df.style.format("{:.4f}"))
+                
+                # Download descriptive statistics
+                stats_buffer = io.BytesIO()
+                desc_stats_df.to_csv(stats_buffer)
+                st.download_button(
+                    "📊 Download Descriptive Statistics",
+                    stats_buffer.getvalue(),
+                    f"descriptive_stats_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+        
+        except Exception as e:
+            st.warning(f"Could not compute descriptive statistics: {str(e)}")
+        
         if st.sidebar.button("▶️ Run Analysis", use_container_width=True):
             with st.spinner("Processing data..."):
                 try:
-                    # Parse dates
-                    df[date_col] = parse_dates(df[date_col])
-                    df = df[[date_col, value_col]].dropna()
-                    df.set_index(date_col, inplace=True)
-                    ts = df[value_col]
-                    
-                    if len(ts) < 10:  # Minimum required for most tests
-                        st.error(f"Insufficient data points ({len(ts)}). Need at least 10 observations.")
+                    # Validate data
+                    if len(ts) < 20:
+                        st.error(f"Insufficient data points ({len(ts)}). Need at least 20 observations for reliable results.")
+                        st.stop()
+                    if ts.isna().any():
+                        st.error("Time series contains missing values. Please clean the data.")
+                        st.stop()
+                    if not np.issubdtype(ts.dtype, np.number):
+                        st.error("Value column must contain numeric data.")
                         st.stop()
                     
                     # Determine appropriate lag selection parameters based on method
@@ -314,15 +355,28 @@ if uploaded_file:
                             try:
                                 # For DFGLS, adapt lag selection method
                                 if lag_selection_method == "Fixed":
-                                    dfgls_method = None
+                                    dfgls_method = None  # Use fixed lags
                                     dfgls_max_lags = max_lags
                                 else:
-                                    dfgls_method = lag_selection_method.lower() if lag_selection_method != "None" else "aic"
+                                    # Map lag selection method to valid DFGLS options
+                                    method_mapping = {
+                                        "AIC": "aic",
+                                        "BIC": "bic",
+                                        "t-stat": "t-stat",
+                                        "None": "aic"  # Default to AIC if None is selected
+                                    }
+                                    dfgls_method = method_mapping.get(lag_selection_method, "aic")  # Default to 'aic'
                                     dfgls_max_lags = max_lags if max_lags is not None else 12
                                 
+                                # Ensure max_lags is valid
+                                if dfgls_max_lags is not None and (dfgls_max_lags < 0 or dfgls_max_lags >= len(ts) // 2):
+                                    st.warning(f"Invalid max_lags ({dfgls_max_lags}) for DFGLS. Using default value (12).")
+                                    dfgls_max_lags = 12
+                                
+                                # Run DFGLS test
                                 dfgls = DFGLS(
-                                    ts, 
-                                    trend=dfgls_regression, 
+                                    ts,
+                                    trend=dfgls_regression,
                                     max_lags=dfgls_max_lags,
                                     method=dfgls_method
                                 )
@@ -335,7 +389,7 @@ if uploaded_file:
                                     'Regression Type': regression_type_display.get(dfgls_regression, dfgls_regression)
                                 }
                             except Exception as e:
-                                st.warning(f"DFGLS test failed: {str(e)}. Check parameter compatibility.")
+                                st.warning(f"DFGLS test failed: {str(e)}. Possible causes: incompatible parameters or insufficient data.")
                                 results['DFGLS'] = {
                                     'Test Statistic': None,
                                     'p-value': None,
@@ -473,6 +527,11 @@ with st.expander("📚 Instructions"):
     - Quarterly: YYYYQ1, YYYY-Q1
     - Yearly: YYYY
     
+    **DFGLS Test Notes**:
+    - Requires at least 20 observations for reliable results.
+    - Supported lag selection methods: AIC, BIC, t-stat, or Fixed.
+    - Only 'Constant' (c) or 'Constant & Trend' (ct) regression types are supported.
+    
     **Dependencies**:
     ```
     streamlit
@@ -482,7 +541,8 @@ with st.expander("📚 Instructions"):
     seaborn
     statsmodels
     arch
+    scipy
     ```
     """)
 
-st.markdown("© 2025 Unit Root Test App | v3.0.0")
+st.markdown("© 2025 Unit Root Test App | v3.1.0")
