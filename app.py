@@ -73,31 +73,6 @@ st.markdown("""
     div.block-container {
         padding-top: 2rem;
     }
-    .metric-value {
-        font-size: 24px;
-        font-weight: bold;
-    }
-    .metric-label {
-        font-size: 14px;
-        color: #666;
-    }
-    .status-box {
-        padding: 10px;
-        border-radius: 5px;
-        margin-bottom: 10px;
-    }
-    .status-box.stationary {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-    }
-    .status-box.non-stationary {
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
-    }
-    .status-box.inconclusive {
-        background-color: #fff3cd;
-        border: 1px solid #ffeeba;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -261,7 +236,7 @@ def lumsdaine_papell_test(y, model='c', trim=0.15, max_lags=12):
     best_bic = np.inf
     best_lag = 0
     
-    for lag in range(min(4, max_lags)):
+    for lag in range(min(12, max_lags)):
         # Simple differencing
         dy = np.diff(y)
         y_lag = y[:-1]
@@ -290,7 +265,7 @@ def lumsdaine_papell_test(y, model='c', trim=0.15, max_lags=12):
     best_breaks = None
     
     # Simplified grid search for computational efficiency
-    step = max(1, (max_idx - min_idx) // 10)  # Sample 10 potential points for faster computation
+    step = max(1, (max_idx - min_idx) // 20)  # Sample 20 potential points
     
     for tb1 in range(min_idx, max_idx - min_idx, step):
         for tb2 in range(tb1 + min_idx, max_idx, step):
@@ -325,15 +300,12 @@ def lumsdaine_papell_test(y, model='c', trim=0.15, max_lags=12):
                 X = np.column_stack((X, dy[best_lag-l:-l]))
             
             # Fit model
-            try:
-                model_fit = sm.OLS(dy[best_lag:], X).fit()
-                t_stat = model_fit.tvalues[1]  # t-stat on the lagged level
-                
-                if abs(t_stat) < best_stat:
-                    best_stat = abs(t_stat)
-                    best_breaks = (tb1, tb2)
-            except:
-                continue  # Skip in case of singular matrix
+            model_fit = sm.OLS(dy[best_lag:], X).fit()
+            t_stat = model_fit.tvalues[1]  # t-stat on the lagged level
+            
+            if abs(t_stat) < best_stat:
+                best_stat = abs(t_stat)
+                best_breaks = (tb1, tb2)
     
     # Define critical values (approximations)
     if model == 'c':
@@ -364,6 +336,25 @@ def lumsdaine_papell_test(y, model='c', trim=0.15, max_lags=12):
         'lags': best_lag,
         'model': model
     }
+
+# Regression type mapping
+regression_types = {
+    'adf_pp': {
+        'c': 'Constant',
+        'ct': 'Constant & Trend',
+        'n': 'No Constant or Trend',
+        'ctt': 'Constant, Linear & Quadratic Trend'
+    },
+    'kpss': {
+        'c': 'Constant',
+        'ct': 'Constant & Trend'
+    },
+    'za': {
+        'c': 'Break in Constant',
+        't': 'Break in Trend',
+        'both': 'Break in Constant & Trend'
+    }
+}
 
 # Sidebar for configuration
 st.sidebar.image("https://raw.githubusercontent.com/statsmodels/statsmodels/main/docs/source/_static/statsmodels-logo-v2-horizontal.svg", width=200)
@@ -417,28 +408,11 @@ if uploaded_file:
         # Test parameters
         st.sidebar.subheader("Test Parameters")
         
-        # ADF parameters
+        # ADF and PP parameters
         adf_regression = st.sidebar.selectbox(
-            "ADF Regression Type", 
+            "ADF/PP Regression Type", 
             options=["c", "ct", "n", "ctt"],
-            format_func=lambda x: {
-                "c": "Constant",
-                "ct": "Constant & Trend",
-                "n": "No Constant or Trend",
-                "ctt": "Constant & Quadratic Trend"
-            }.get(x),
-            index=1
-        )
-        
-        # PP parameters
-        pp_regression = st.sidebar.selectbox(
-            "PP Regression Type", 
-            options=["c", "ct", "n"],
-            format_func=lambda x: {
-                "c": "Constant",
-                "ct": "Constant & Trend",
-                "n": "No Constant or Trend"
-            }.get(x),
+            format_func=lambda x: regression_types['adf_pp'].get(x, x),
             index=1
         )
         
@@ -446,10 +420,7 @@ if uploaded_file:
         kpss_regression = st.sidebar.selectbox(
             "KPSS Regression Type", 
             options=["c", "ct"],
-            format_func=lambda x: {
-                "c": "Constant",
-                "ct": "Constant & Trend"
-            }.get(x),
+            format_func=lambda x: regression_types['kpss'].get(x, x),
             index=0
         )
         
@@ -457,11 +428,7 @@ if uploaded_file:
         za_regression = st.sidebar.selectbox(
             "Zivot-Andrews Model", 
             options=["c", "t", "both"],
-            format_func=lambda x: {
-                "c": "Break in Constant",
-                "t": "Break in Trend",
-                "both": "Break in Constant & Trend"
-            }.get(x),
+            format_func=lambda x: regression_types['za'].get(x, x),
             index=2
         )
         
@@ -469,10 +436,7 @@ if uploaded_file:
         ls_model = st.sidebar.selectbox(
             "Lee-Strazicich Model",
             options=["c", "ct"],
-            format_func=lambda x: {
-                "c": "Crash Model (Level Shift)", 
-                "ct": "Trend Shift Model"
-            }.get(x),
+            format_func=lambda x: {"c": "Crash Model (Level Shift)", "ct": "Trend Shift Model"}.get(x, x),
             index=0
         )
         
@@ -480,10 +444,7 @@ if uploaded_file:
         lp_model = st.sidebar.selectbox(
             "Lumsdaine-Papell Model",
             options=["c", "ct"],
-            format_func=lambda x: {
-                "c": "Crash Model (Level Shift)", 
-                "ct": "Trend Shift Model"
-            }.get(x),
+            format_func=lambda x: {"c": "Crash Model (Level Shift)", "ct": "Trend Shift Model"}.get(x, x),
             index=0
         )
         
@@ -526,10 +487,6 @@ if uploaded_file:
                 df = df[[date_col, value_col]].dropna()
                 df.set_index(date_col, inplace=True)
                 ts = df[value_col]
-                
-                if len(ts) < 20:
-                    st.error("Time series is too short (less than 20 observations). Please use a longer time series.")
-                    st.stop()
                 
                 st.success(f"Successfully processed {len(ts)} time series observations from {ts.index.min()} to {ts.index.max()}")
                 
@@ -576,7 +533,11 @@ if uploaded_file:
                     # PP Test
                     if run_pp:
                         try:
-                            pp = PhillipsPerron(ts, trend=pp_regression, lags=int(max_lags/2))
+                            # Convert regression type for PP test
+                            pp_trend_map = {'c': 'c', 'ct': 'ct', 'n': 'n', 'ctt': 'ct'}
+                            pp_trend = pp_trend_map.get(adf_regression, 'c')
+                            
+                            pp = PhillipsPerron(ts, trend=pp_trend, lags=max_lags)
                             results['Phillips-Perron'] = {
                                 'Test Statistic': pp.stat,
                                 'p-value': pp.pvalue,
@@ -584,7 +545,7 @@ if uploaded_file:
                                 'Critical Values (5%)': pp.critical_values['5%'],
                                 'Critical Values (10%)': pp.critical_values['10%'],
                                 'Lags': pp.lags,
-                                'Regression Type': pp_regression,
+                                'Regression Type': pp_trend,
                                 'Breakpoint': 'N/A'
                             }
                         except Exception as e:
@@ -593,8 +554,7 @@ if uploaded_file:
                     # KPSS Test
                     if run_kpss:
                         try:
-                            kpss_lags = int(4 * (len(ts)/100)**(1/4)) if max_lags is None else max_lags
-                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags=kpss_lags)
+                            kpss_stat, kpss_pval, kpss_lags, kpss_crit = kpss(ts, regression=kpss_regression, nlags="auto")
                             results['KPSS'] = {
                                 'Test Statistic': kpss_stat,
                                 'p-value': kpss_pval,
@@ -611,6 +571,10 @@ if uploaded_file:
                     # Zivot-Andrews Test
                     if run_za:
                         try:
+                            # Convert regression type for ZA test
+                            za_trend_map = {'c': 'c', 't': 't', 'both': 'both'}
+                            za_trend = za_trend_map.get(za_regression, 'both')
+                            
                             za = ZivotAndrews(ts, lags=max_lags)
                             
                             # Get break date
@@ -624,7 +588,7 @@ if uploaded_file:
                                 'Critical Values (5%)': za.critical_values['5%'],
                                 'Critical Values (10%)': za.critical_values['10%'],
                                 'Lags': za.lags,
-                                'Regression Type': za_regression,
+                                'Regression Type': za_trend,
                                 'Breakpoint': breakpoint_date.strftime('%Y-%m-%d')
                             }
                         except Exception as e:
@@ -720,483 +684,4 @@ if uploaded_file:
                             
                             dfgls = DFGLS(ts, lags=max_lags, trend=trend_bool)
                             results['DF-GLS'] = {
-                                'Test Statistic': dfgls.stat,
-                                'p-value': dfgls.pvalue,
-                                'Critical Values (1%)': dfgls.critical_values['1%'],
-                                'Critical Values (5%)': dfgls.critical_values['5%'],
-                                'Critical Values (10%)': dfgls.critical_values['10%'],
-                                'Lags': dfgls.lags,
-                                'Regression Type': 'trend' if trend_bool else 'constant',
-                                'Breakpoint': 'N/A'
-                            }
-                        except Exception as e:
-                            st.error(f"Error in DF-GLS test: {str(e)}")
-                    
-                    # Variance Ratio Test
-                    if run_vr:
-                        try:
-                            vr = VarianceRatio(ts, lags=4)
-                            results['Variance Ratio'] = {
-                                'Test Statistic': vr.stat,
-                                'p-value': vr.pvalue,
-                                'Critical Values (1%)': vr.critical_values['1%'],
-                                'Critical Values (5%)': vr.critical_values['5%'],
-                                'Critical Values (10%)': vr.critical_values['10%'],
-                                'Lags': 4,
-                                'Regression Type': 'N/A',
-                                'Breakpoint': 'N/A'
-                            }
-                        except Exception as e:
-                            st.error(f"Error in Variance Ratio test: {str(e)}")
-                
-                st.success("✅ Unit root tests completed!")
-                
-                # Extract key results for summary table
-                summary_cols = ['Test Statistic', 'p-value', 'Critical Values (5%)', 'Lags', 'Breakpoint']
-                results_df = pd.DataFrame({k: {col: v[col] for col in summary_cols if col in v} 
-                                          for k, v in results.items()}).T
-                
-                # Create detailed results dataframe
-                detailed_results = pd.DataFrame(results).T
-                
-                # Display results in tabs
-                tab1, tab2 = st.tabs(["Summary Results", "Detailed Results"])
-                
-                with tab1:
-                    st.subheader("📋 Unit Root Test Summary")
-                    
-                    # Format summary table
-                    st.dataframe(results_df.style.format({
-                        'Test Statistic': '{:.4f}',
-                        'p-value': '{:.4f}',
-                        'Critical Values (5%)': '{:.4f}'
-                    }), use_container_width=True)
-                    
-                    # Quick interpretation
-                    st.subheader("🔍 Test Interpretation")
-                    
-                    # Create columns for test interpretations
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("##### Unit Root Test Results")
-                        # Create interpretation
-                        interpretations = []
-                        overall_stationary = 0
-                        overall_nonstationary = 0
-                        
-                        for test, values in results.items():
-                            p_value = values['p-value']
-                            stat = values['Test Statistic']
-                            crit_val = values.get('Critical Values (5%)', None)
-                            
-                            if test == 'KPSS':
-                                # For KPSS, null hypothesis is stationarity
-                                if p_value < 0.05:
-                                    interpretations.append(f"• {test}: **Non-stationary** (p-value = {p_value:.4f} < 0.05)")
-                                    overall_nonstationary += 1
-                                else:
-                                    interpretations.append(f"• {test}: **Stationary** (p-value = {p_value:.4f} ≥ 0.05)")
-                                    overall_stationary += 1
-                            else:
-                                # For other tests, null hypothesis is non-stationarity
-                                if p_value < 0.05:
-                                    interpretations.append(f"• {test}: **Stationary** (p-value = {p_value:.4f} < 0.05)")
-                                    overall_stationary += 1
-                                else:
-                                    interpretations.append(f"• {test}: **Non-stationary** (p-value = {p_value:.4f} ≥ 0.05)")
-                                    overall_nonstationary += 1
-                        
-                        # Display interpretations
-                        for interp in interpretations:
-                            st.markdown(interp)
-                    
-                    with col2:
-                        st.markdown("##### Overall Assessment")
-                        
-                        # Determine overall consensus
-                        if overall_stationary > overall_nonstationary:
-                            status_class = "stationary"
-                            status_text = "Stationary"
-                            description = f"The time series appears to be **stationary** based on {overall_stationary} out of {overall_stationary + overall_nonstationary} tests."
-                        elif overall_nonstationary > overall_stationary:
-                            status_class = "non-stationary"
-                            status_text = "Non-Stationary"
-                            description = f"The time series appears to be **non-stationary** based on {overall_nonstationary} out of {overall_stationary + overall_nonstationary} tests."
-                        else:
-                            status_class = "inconclusive"
-                            status_text = "Inconclusive"
-                            description = f"The results are **inconclusive** with {overall_stationary} tests indicating stationarity and {overall_nonstationary} tests indicating non-stationarity."
-                        
-                        # Display status box
-                        st.markdown(f"""
-                        <div class="status-box {status_class}">
-                            <h3 style="margin-top:0;">{status_text}</h3>
-                            <p>{description}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Explain implications
-                        st.markdown("##### What This Means")
-                        if status_class == "stationary":
-                            st.markdown("""
-                            - The series has constant mean and variance over time
-                            - Shocks to the system are temporary
-                            - The series can be modeled using ARMA processes
-                            - Forecasting and statistical inference are straightforward
-                            """)
-                        elif status_class == "non-stationary":
-                            st.markdown("""
-                            - The series may have unit roots, trends, or changing variance
-                            - Shocks to the system have permanent effects
-                            - Differencing may be required before modeling
-                            - Consider ARIMA, SARIMA, or cointegration analysis
-                            """)
-                        else:
-                            st.markdown("""
-                            - Different tests provide conflicting evidence
-                            - Consider examining the structural breaks identified
-                            - Try differencing and testing again
-                            - Visual inspection of ACF/PACF plots may help
-                            """)
-                
-                with tab2:
-                    st.subheader("📊 Detailed Test Results")
-                    st.dataframe(detailed_results.style.format({
-                        'Test Statistic': '{:.4f}',
-                        'p-value': '{:.4f}',
-                        'Critical Values (1%)': '{:.4f}',
-                        'Critical Values (5%)': '{:.4f}',
-                        'Critical Values (10%)': '{:.4f}'
-                    }), use_container_width=True)
-                    
-                    # Display test descriptions
-                    with st.expander("ℹ️ Unit Root Test Descriptions"):
-                        st.markdown("""
-                        **Augmented Dickey-Fuller (ADF)** - Tests the null hypothesis that a unit root is present. A low p-value rejects the null and suggests stationarity.
-                        
-                        **Phillips-Perron (PP)** - A non-parametric test that is robust to serial correlation. Like ADF, it tests for unit roots.
-                        
-                        **KPSS** - Unlike ADF and PP, the null hypothesis is that the series is stationary. A low p-value suggests non-stationarity.
-                        
-                        **Zivot-Andrews** - Tests for unit root allowing for a single structural break. Particularly useful when structural breaks might lead to false non-rejection of the unit root hypothesis.
-                        
-                        **Lee-Strazicich** - A Lagrange Multiplier unit root test that allows for one or two structural breaks under both the null and alternative hypotheses.
-                        
-                        **Lumsdaine-Papell** - An extension of Zivot-Andrews that allows for two structural breaks. Helps identify multiple regime changes.
-                        
-                        **DF-GLS** - A more powerful variant of the ADF test that uses generalized least squares detrending.
-                        
-                        **Variance Ratio** - Tests the random walk hypothesis based on the property that the variance of random walk increments is linear in the sampling interval.
-                        """)
-                
-                # Visualizations
-                st.subheader("📊 Visual Analysis")
-                
-                # Create visualization tabs
-                viz_tab1, viz_tab2, viz_tab3 = st.tabs(["P-value Heatmap", "Time Series with Breaks", "Stationarity Analysis"])
-                
-                with viz_tab1:
-                    # P-value Heatmap
-                    fig1, ax1 = plt.subplots(figsize=(8, len(results)/2 + 1))
-                    sns.heatmap(
-                        results_df[["p-value"]].astype(float), 
-                        annot=True, 
-                        cmap='RdYlGn_r', 
-                        fmt=".4f", 
-                        ax=ax1,
-                        vmin=0, 
-                        vmax=0.1,
-                        cbar_kws={'label': 'p-value'}
-                    )
-                    ax1.set_title("P-values from Unit Root Tests")
-                    plt.tight_layout()
-                    st.pyplot(fig1)
-                
-                with viz_tab2:
-                    if break_dates:
-                        # Time Series Plot with Breaks
-                        fig2, ax2 = plt.subplots(figsize=(10, 5))
-                        ax2.plot(ts.index, ts.values, label='Time Series', linewidth=2)
-                        
-                        # Color map for different breaks
-                        colors = ['red', 'blue', 'green', 'purple', 'orange']
-                        color_idx = 0
-                        
-                        # Add breakpoint lines
-                        for test, break_date in break_dates.items():
-                            color = colors[color_idx % len(colors)]
-                            linestyle = '--' if 'ZA' in test or 'LS1' in test else '-.'
-                            ax2.axvline(break_date, color=color, linestyle=linestyle, linewidth=2, 
-                                        label=f'{test} Break: {break_date.strftime("%Y-%m-%d")}')
-                            color_idx += 1
-                        
-                        ax2.set_title("Time Series with Structural Break Detection")
-                        ax2.set_xlabel("Date")
-                        ax2.set_ylabel(value_col)
-                        ax2.legend(loc='best')
-                        ax2.grid(True, alpha=0.3)
-                        plt.tight_layout()
-                        st.pyplot(fig2)
-                    else:
-                        st.warning("No structural breaks detected or structural break tests not selected.")
-                
-                with viz_tab3:
-                    # Create differentiated series
-                    ts_diff = ts.diff().dropna()
-                    
-                    # Create subplot
-                    fig3, axs = plt.subplots(3, 1, figsize=(10, 12))
-                    
-                    # Original series
-                    axs[0].plot(ts.index, ts.values, label='Original Series', color='blue')
-                    axs[0].set_title("Original Time Series")
-                    axs[0].grid(True, alpha=0.3)
-                    
-                    # Differenced series
-                    axs[1].plot(ts_diff.index, ts_diff.values, label='First Differenced Series', color='green')
-                    axs[1].set_title("First Differenced Series")
-                    axs[1].grid(True, alpha=0.3)
-                    
-                    # ACF/PACF plots to check stationarity
-                    from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
-                    
-                    plot_acf(ts, lags=min(30, len(ts)//4), ax=axs[2], alpha=0.05)
-                    axs[2].set_title("Autocorrelation Function (ACF)")
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig3)
-                    
-                    # Create another plot for PACF
-                    fig4, ax4 = plt.subplots(figsize=(10, 4))
-                    plot_pacf(ts, lags=min(30, len(ts)//4), ax=ax4, alpha=0.05)
-                    ax4.set_title("Partial Autocorrelation Function (PACF)")
-                    plt.tight_layout()
-                    st.pyplot(fig4)
-                    
-                    # Add explanatory text
-                    st.markdown("""
-                    **Stationarity Analysis:**
-                    
-                    The charts above show the original time series, its first difference, and the ACF/PACF plots.
-                    
-                    **For a stationary series:**
-                    
-                    1. The ACF should decay quickly to zero
-                    2. The PACF should have a sharp cutoff
-                    3. The differenced series should fluctuate around a constant mean
-                    
-                    **For a non-stationary series:**
-                    
-                    1. The ACF decreases slowly
-                    2. There may be significant autocorrelation at high lags
-                    3. The original series shows trends or changing variance
-                    """)
-                
-                # Download options
-                st.subheader("📥 Download Results")
-                
-                # Create Excel file with multiple sheets
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
-                    # Summary sheet
-                    results_df.to_excel(writer, sheet_name='Summary Results')
-                    workbook = writer.book
-                    worksheet = writer.sheets['Summary Results']
-                    
-                    # Add formatting
-                    header_format = workbook.add_format({
-                        'bold': True,
-                        'text_wrap': True,
-                        'valign': 'top',
-                        'fg_color': '#D7E4BC',
-                        'border': 1
-                    })
-                    
-                    for col_num, value in enumerate(results_df.columns.values):
-                        worksheet.write(0, col_num + 1, value, header_format)
-                    
-                    # Detailed results sheet
-                    detailed_results.to_excel(writer, sheet_name='Detailed Results')
-                    
-                    # Original data sheet
-                    ts.to_frame().to_excel(writer, sheet_name='Original Data')
-                    
-                    # Add metadata sheet
-                    meta_data = {
-                        'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'File Analyzed': uploaded_file.name,
-                        'Date Column': date_col,
-                        'Value Column': value_col,
-                        'Number of Observations': len(ts),
-                        'Start Date': ts.index.min().strftime('%Y-%m-%d'),
-                        'End Date': ts.index.max().strftime('%Y-%m-%d'),
-                        'Tests Run': ', '.join(results.keys()),
-                        'Overall Assessment': status_text if 'status_text' in locals() else 'Not determined'
-                    }
-                    pd.DataFrame(list(meta_data.items()), columns=['Metadata', 'Value']).to_excel(writer, sheet_name='Metadata')
-                    
-                    # Add interpretation sheet
-                    if 'interpretations' in locals():
-                        interp_data = {
-                            'Test': [i.split(':')[0].replace('• ', '') for i in interpretations],
-                            'Result': [i.split(':')[1].strip() for i in interpretations]
-                        }
-                        pd.DataFrame(interp_data).to_excel(writer, sheet_name='Interpretation')
-                
-                excel_buffer.seek(0)
-                
-                # Create download buttons in columns
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    st.download_button(
-                        "📊 Download Excel Report",
-                        data=excel_buffer.getvalue(),
-                        file_name=f"unit_root_results_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.ms-excel",
-                        use_container_width=True
-                    )
-                
-                # Create PDF for plots
-                with col2:
-                    # Create a comprehensive PDF with all plots
-                    pdf_buffer = io.BytesIO()
-                    
-                    # Save multiple figures to a single PDF
-                    from matplotlib.backends.backend_pdf import PdfPages
-                    
-                    with PdfPages(pdf_buffer) as pdf:
-                        # Add all figures
-                        if 'fig' in locals(): pdf.savefig(fig)
-                        if 'fig1' in locals(): pdf.savefig(fig1)
-                        if break_dates and 'fig2' in locals(): pdf.savefig(fig2)
-                        if 'fig3' in locals(): pdf.savefig(fig3)
-                        if 'fig4' in locals(): pdf.savefig(fig4)
-                        
-                        # Create a metadata page
-                        plt.figure(figsize=(8.5, 11))
-                        plt.axis('off')
-                        plt.text(0.5, 0.95, "Unit Root Test Analysis Report", ha='center', fontsize=16, fontweight='bold')
-                        plt.text(0.5, 0.9, f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ha='center')
-                        plt.text(0.5, 0.85, f"File: {uploaded_file.name}", ha='center')
-                        
-                        y_pos = 0.8
-                        plt.text(0.1, y_pos, "Test Results Summary:", fontweight='bold')
-                        y_pos -= 0.05
-                        
-                        for interp in interpretations:
-                            plt.text(0.1, y_pos, interp)
-                            y_pos -= 0.05
-                        
-                        if 'status_text' in locals():
-                            y_pos -= 0.05
-                            plt.text(0.1, y_pos, f"Overall Assessment: {status_text}", fontweight='bold')
-                        
-                        pdf.savefig()
-                        plt.close()
-                    
-                    pdf_buffer.seek(0)
-                    
-                    st.download_button(
-                        "📈 Download All Plots (PDF)",
-                        data=pdf_buffer.getvalue(),
-                        file_name=f"unit_root_plots_{datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-            
-            except Exception as e:
-                st.error(f"Error during analysis: {str(e)}")
-                st.error("Please ensure you've selected the correct date and value columns.")
-    
-    except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
-        st.error("Please ensure your file is in the correct format (CSV or Excel).")
-
-else:
-    # Display sample data option
-    st.info("Please upload a time series file (CSV or Excel) or use the sample data below.")
-    
-    if st.button("Load Sample Data"):
-        # Generate sample time series
-        start_date = pd.Timestamp('2010-01-01')
-        periods = 120
-        dates = pd.date_range(start=start_date, periods=periods, freq='M')
-        
-        # Create trend with structural break
-        trend = np.arange(periods) * 0.1
-        trend[60:] = trend[60:] + 5  # Add structural break
-        
-        # Add seasonality, noise and random walk component
-        seasonality = 2 * np.sin(np.arange(periods) * 2 * np.pi / 12)
-        noise = np.random.normal(0, 1, periods)
-        random_walk = np.cumsum(np.random.normal(0, 0.5, periods))
-        
-        values = trend + seasonality + noise + random_walk
-        
-        # Create DataFrame
-        sample_df = pd.DataFrame({
-            'date': dates,
-            'value': values
-        })
-        
-        # Cache the sample data
-        st.session_state['sample_data'] = sample_df
-        
-        # Display success message
-        st.success("Sample data loaded successfully!")
-        
-        # Show preview
-        st.dataframe(sample_df.head(10))
-        
-        # Save to CSV for download
-        csv_buffer = io.BytesIO()
-        sample_df.to_csv(csv_buffer, index=False)
-        csv_buffer.seek(0)
-        
-        st.download_button(
-            "Download Sample Data (CSV)",
-            data=csv_buffer.getvalue(),
-            file_name="sample_time_series.csv",
-            mime="text/csv"
-        )
-        
-    # Instructions
-    with st.expander("📚 Instructions & Information"):
-        st.markdown("""
-        ### How to Use This App
-        
-        1. **Upload a time series file** in CSV or Excel format
-        2. **Select the date and value columns** from your data
-        3. **Choose which unit root tests** to run in the sidebar
-        4. **Configure test parameters** in the sidebar
-        5. **Run the analysis** and interpret the results
-        6. **Download the results** as an Excel report or PDF plots
-        
-        ### About Unit Root Tests
-        
-        Unit root tests check whether a time series is stationary or not:
-        
-        - **Augmented Dickey-Fuller (ADF)**: Tests the null hypothesis that a unit root is present
-        - **Phillips-Perron (PP)**: Non-parametric test that is robust to heteroskedasticity
-        - **KPSS**: Tests the null hypothesis that the series is stationary
-        - **Zivot-Andrews**: Tests for unit root with a single structural break
-        - **Lee-Strazicich**: Tests for unit roots with one or two structural breaks using LM test
-        - **Lumsdaine-Papell**: Tests for unit roots with two structural breaks
-        - **DF-GLS**: A more powerful variant of the ADF test
-        - **Variance Ratio**: Tests the random walk hypothesis
-        
-        For ADF, PP, DF-GLS, Zivot-Andrews, Lee-Strazicich, and Lumsdaine-Papell tests, a p-value < 0.05 suggests stationarity.  
-        For KPSS test, a p-value < 0.05 suggests non-stationarity.
-        """)
-        
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        "Created with ❤️ | "
-        "© 2025 Advanced Unit Root Testing Application | "
-        "Version 2.1.0"
-    )
-stat'],
-                                'p-value': lp_result['
+                                'Test Statistic
