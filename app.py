@@ -356,7 +356,8 @@ if uploaded_file:
                                     desc_stats_df = pd.DataFrame(desc_stats_all)
                                     
                                     st.subheader(f"📊 Descriptive Statistics: {display_title}")
-                                    st.dataframe(desc_stats_df.style.format("{:.4f}"))
+                                    # Fix the formatting to handle potential non-numeric values
+                                    st.dataframe(desc_stats_df.style.format(lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x))
                                     
                                     # Show JB test results more prominently
                                     st.subheader("Jarque-Bera Test for Normality")
@@ -366,9 +367,10 @@ if uploaded_file:
                                         'p-value': [v['JB p-value'] for v in desc_stats_all.values()],
                                         'Normally Distributed': [v['Normal'] for v in desc_stats_all.values()]
                                     })
+                                    # Fix formatting to handle potential non-numeric values
                                     st.dataframe(jb_results.style.format({
-                                        'JB Statistic': '{:.4f}',
-                                        'p-value': '{:.4f}'
+                                        'JB Statistic': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x,
+                                        'p-value': lambda x: '{:.4f}'.format(x) if isinstance(x, (int, float)) else x
                                     }))
                                     
                                     # Visualization of distribution
