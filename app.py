@@ -7,7 +7,7 @@ import io
 
 from statsmodels.tsa.stattools import adfuller, kpss
 from arch.unitroot import PhillipsPerron, ZivotAndrews
-from linearmodels.unitroot import ZivotAndrews as LMZivotAndrews
+# from linearmodels.unitroot import ZivotAndrews as LMZivotAndrews
 
 # --- Page Settings ---
 st.set_page_config(page_title="Unit Root Test App", layout="wide")
@@ -49,14 +49,6 @@ if uploaded_file:
             'Breakpoint': ts.index[za.break_point].strftime('%Y-%m')
         }
 
-        # LM Zivot-Andrews Test
-        lmza = LMZivotAndrews(ts)
-        results['LM-Zivot-Andrews'] = {
-            'Test Statistic': lmza.stat,
-            'p-value': lmza.pvalue,
-            'Breakpoint': ts.index[lmza.break_index].strftime('%Y-%m')
-        }
-
         # Results Summary Table
         results_df = pd.DataFrame(results).T.round(4)
         st.subheader("📋 Test Results Summary")
@@ -72,7 +64,6 @@ if uploaded_file:
         fig2, ax2 = plt.subplots(figsize=(10, 4))
         ax2.plot(ts, label='Time Series')
         ax2.axvline(ts.index[za.break_point], color='red', linestyle='--', label='Zivot-Andrews Break')
-        ax2.axvline(ts.index[lmza.break_index], color='green', linestyle='--', label='LM-Zivot-Andrews Break')
         ax2.set_title("Time Series with Structural Breaks")
         ax2.legend()
         ax2.grid(True)
