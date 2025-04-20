@@ -141,7 +141,7 @@ with st.sidebar:
         df.columns = [c.strip().lower() for c in df.columns]
         date_col = st.selectbox("Date column", df.columns)
         value_col = st.selectbox("Value column", df.columns)
-        st.write(df[[date_col, value_col]].head())
+        st.dataframe(df[[date_col, value_col]].head(10))
         tests = {
             'adf': st.checkbox("ADF", True),
             'pp': st.checkbox("PP", True),
@@ -185,3 +185,4 @@ with st.sidebar:
 # Footer
 st.markdown("---")
 st.info("© 2025 Advanced Unit Root Test App")
+
