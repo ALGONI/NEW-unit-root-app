@@ -10,7 +10,14 @@ from statsmodels.tsa.stattools import adfuller, kpss
 from arch.unitroot import PhillipsPerron, ZivotAndrews, DFGLS, VarianceRatio
 from matplotlib.backends.backend_pdf import PdfPages
 import warnings
-import ruptures as rpt  # For additional structural break detection (Bai-Perron)
+
+# Check for ruptures availability
+try:
+    import ruptures as rpt
+    RUPTURES_AVAILABLE = True
+except ImportError:
+    RUPTURES_AVAILABLE = False
+    rpt = None
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings('ignore')
@@ -56,10 +63,14 @@ test_options = {
     'PP': st.sidebar.checkbox("Phillips-Perron (PP)", value=True),
     'KPSS': st.sidebar.checkbox("KPSS", value=True),
     'ZA': st.sidebar.checkbox("Zivot-Andrews", value=True),
-    'BP': st.sidebar.checkbox("Bai-Perron (Structural Breaks)", value=True),
+    'BP': st.sidebar.checkbox("Bai-Perron (Structural Breaks)", value=True, disabled=not RUPTURES_AVAILABLE),
     'DFGLS': st.sidebar.checkbox("DFGLS", value=True),
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
+
+# Warn if Bai-Perron is selected but ruptures is not available
+if test_options['BP'] and not RUPTURES_AVAILABLE:
+    st.sidebar.warning("Bai-Perron test requires the 'ruptures' library. Please install it using 'pip install ruptures'.")
 
 # Test parameters
 st.sidebar.subheader("Test Parameters")
@@ -241,9 +252,9 @@ if uploaded_file:
                             if breakpoint_date:
                                 breakpoints.append(('ZA', breakpoint_date))
                         
-                        if test_options['BP']:
+                        if test_options['BP'] and RUPTURES_AVAILABLE:
                             algo = rpt.Pelt(model="l2").fit(ts.values)
-                            bp_indices = algo.predict(pen=10)  # Penalty parameter for number of breaks
+                            bp_indices = algo.predict(pen=10)
                             bp_dates = [ts.index[i] for i in bp_indices if i < len(ts)]
                             results['BP'] = {
                                 'Test Statistic': 'N/A',
@@ -393,6 +404,11 @@ with st.expander("📚 Instructions"):
     - Monthly: YYYY-MM, YYYYMM, YYYY-MM, 2013M01
     - Quarterly: YYYYQ1, YYYY-Q1
     - Yearly: YYYY
+    
+    **Dependencies**:
+    - Install required packages: `pip install streamlit pandas numpy matplotlib seaborn statsmodels arch xlsxwriter`
+    - For Bai-Perron test: `pip install ruptures`
+    - For Streamlit Cloud, add these to a `requirements.txt` file.
     """)
 
-st.markdown("© 2025 Unit Root Test App | v2.2.0")
+st.markdown("© 2025 Unit Root Test App | v2.3.0")
