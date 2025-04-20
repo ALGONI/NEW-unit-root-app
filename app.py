@@ -66,6 +66,22 @@ analysis_options = {
     'VR': st.sidebar.checkbox("Variance Ratio", value=False)
 }
 
+# Descriptive statistics options
+if analysis_options['Descriptive']:
+    st.sidebar.subheader("Descriptive Statistics Options")
+    stat_options = [
+        'Observation Count', 'Mean', 'Std', 'Min', 'Max', 
+        'Skewness', 'Kurtosis', 'JB Statistic', 'JB p-value', 'Normal'
+    ]
+    selected_stats = st.sidebar.multiselect(
+        "Select Statistics to Display",
+        options=stat_options,
+        default=['Observation Count', 'Mean', 'Std', 'Min', 'Max', 
+                 'Skewness', 'Kurtosis', 'JB Statistic', 'JB p-value', 'Normal']
+    )
+else:
+    selected_stats = []
+
 # Data differencing option
 st.sidebar.subheader("Differencing Level")
 diff_options = ["Level (No Differencing)", "First Difference", "Second Difference"]
@@ -264,7 +280,6 @@ if uploaded_file:
                         try:
                             # Compute descriptive statistics for all selected columns
                             desc_stats_all = {}
-                            jb_test_results = {}
                             
                             for col in value_cols:
                                 ts = df[col]
@@ -285,23 +300,27 @@ if uploaded_file:
                                 
                                 # Calculate stats for the (possibly differenced) series
                                 desc_stats_all[col + suffix] = {
-                                    'Count': ts_diff.count(),
+                                    'Observation Count': ts_diff.count(),
                                     'Mean': ts_diff.mean(),
                                     'Std': ts_diff.std(),
                                     'Min': ts_diff.min(),
-                                    '25%': ts_diff.quantile(0.25),
-                                    '50%': ts_diff.quantile(0.50),
-                                    '75%': ts_diff.quantile(0.75),
                                     'Max': ts_diff.max(),
                                     'Skewness': skew(ts_diff),
                                     'Kurtosis': kurtosis(ts_diff, fisher=True),
-                                    'JB Stat': jb_stat,
+                                    'JB Statistic': jb_stat,
                                     'JB p-value': jb_pval,
                                     'Normal': "Yes" if jb_pval > 0.05 else "No"
                                 }
                             
-                            # Create a DataFrame from the descriptive statistics
-                            desc_stats_df = pd.DataFrame(desc_stats_all)
+                            # Filter stats based on user selection
+                            if selected_stats:
+                                desc_stats_filtered = {
+                                    col: {stat: values[stat] for stat in selected_stats}
+                                    for col, values in desc_stats_all.items()
+                                }
+                                desc_stats_df = pd.DataFrame(desc_stats_filtered)
+                            else:
+                                desc_stats_df = pd.DataFrame(desc_stats_all)
                             
                             # Select the TS for the selected variable and apply differencing
                             ts = apply_differencing(df[selected_var], diff_selection)
@@ -345,20 +364,10 @@ if uploaded_file:
                             if analysis_options['Descriptive']:
                                 with analysis_tabs[tab_index]:
                                     st.subheader(f"📊 Descriptive Statistics: {display_title}")
-                                    st.dataframe(desc_stats_df.style.format("{:.4f}"))
-                                    
-                                    # Show JB test results more prominently
-                                    st.subheader("Jarque-Bera Test for Normality")
-                                    jb_results = pd.DataFrame({
-                                        'Variable': [k for k in desc_stats_all.keys()],
-                                        'JB Statistic': [v['JB Stat'] for v in desc_stats_all.values()],
-                                        'p-value': [v['JB p-value'] for v in desc_stats_all.values()],
-                                        'Normally Distributed': [v['Normal'] for v in desc_stats_all.values()]
-                                    })
-                                    st.dataframe(jb_results.style.format({
-                                        'JB Statistic': '{:.4f}',
-                                        'p-value': '{:.4f}'
-                                    }))
+                                    if selected_stats:
+                                        st.dataframe(desc_stats_df.style.format("{:.4f}"))
+                                    else:
+                                        st.warning("No descriptive statistics selected. Please select at least one statistic to display.")
                                     
                                     # Visualization of distribution
                                     st.subheader("Distribution Analysis")
@@ -573,8 +582,6 @@ if uploaded_file:
                                         
                                         # Download results
                                         st.subheader("📥 Download Results")
-
-                                        # CSV download option (doesn't require xlsxwriter)
                                         csv_buffer = io.BytesIO()
                                         results_df.to_csv(csv_buffer)
                                         st.download_button(
@@ -637,7 +644,8 @@ with st.expander("📚 Instructions"):
     2. Select date and value column(s)
     3. Choose the differencing level (Level, First Difference, Second Difference)
     4. Select analysis options (Descriptive Statistics and/or Unit Root Tests)
-    5. Run analysis and download results
+    5. For Descriptive Statistics, select which statistics to display (e.g., Mean, Std, Skewness, etc.)
+    6. Run analysis and download results
     
     **Differencing Levels**:
     - **Level (No Differencing)**: Original data without transformation
@@ -647,6 +655,18 @@ with st.expander("📚 Instructions"):
     **Analysis Options**:
     - **Descriptive Statistics**: Provides summary statistics including Jarque-Bera test for normality
     - **Unit Root Tests**: Tests for stationarity (ADF, PP, KPSS, DFGLS, VR)
+    
+    **Descriptive Statistics Options**:
+    - **Observation Count**: Number of data points
+    - **Mean**: Average value
+    - **Std**: Standard deviation
+    - **Min**: Minimum value
+    - **Max**: Maximum value
+    - **Skewness**: Measure of asymmetry
+    - **Kurtosis**: Measure of tailedness
+    - **JB Statistic**: Jarque-Bera test statistic
+    - **JB p-value**: p-value for Jarque-Bera test
+    - **Normal**: Indicates if data is normally distributed (Yes if p-value > 0.05)
     
     **Lag Selection Methods**:
     - **Fixed Value**: Uses the exact number of lags you specify
@@ -672,16 +692,3 @@ with st.expander("📚 Instructions"):
     - DFGLS: Requires at least 20 observations and only supports 'Constant' or 'Constant & Trend'
     
     **Dependencies**:
-    ```
-    streamlit
-    pandas
-    numpy
-    matplotlib
-    seaborn
-    statsmodels
-    arch
-    scipy
-    ```
-    """)
-
-st.markdown("© 2025 Unit Root Test App | v3.3.0")
